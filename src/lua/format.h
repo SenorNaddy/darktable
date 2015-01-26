@@ -27,14 +27,13 @@ struct dt_imageio_module_format_t;
 /**
 helper for formats to declare their lua interface
 */
-#define dt_lua_register_format(L,format,type_name) \
-  dt_lua_register_format_typeid(L,format,luaA_type_find(#type_name))
-void dt_lua_register_format_typeid(lua_State* L, struct dt_imageio_module_format_t* module,luaA_Type type_id);
+#define dt_lua_register_format(L, format, type_name)                                                         \
+  dt_lua_register_format_type(L, format, luaA_type_find(#type_name))
+void dt_lua_register_format_type(lua_State *L, struct dt_imageio_module_format_t *module, luaA_Type type_id);
 
-int dt_lua_init_format(lua_State *L);
+int dt_lua_init_early_format(lua_State *L);
 
 #endif
 // modelines: These editor modelines have been set for all relevant files by tools/update_modelines.sh
 // vim: shiftwidth=2 expandtab tabstop=2 cindent
 // kate: tab-indents: off; indent-width 2; replace-tabs on; indent-mode cstyle; remove-trailing-space on;
-

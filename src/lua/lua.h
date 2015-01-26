@@ -37,7 +37,7 @@
   (0,+1)
   find or create the global darktable module table and push it on the stack
   */
-int dt_lua_push_darktable_lib(lua_State* L);
+int dt_lua_push_darktable_lib(lua_State *L);
 
 /**
   (-1,+1)
@@ -46,21 +46,32 @@ int dt_lua_push_darktable_lib(lua_State* L);
 
   used to easily do a tree organisation of objects
 */
-void dt_lua_goto_subtable(lua_State *L,const char* sub_name);
+void dt_lua_goto_subtable(lua_State *L, const char *sub_name);
 
 
 void dt_lua_init_lock();
-gboolean dt_lua_lock();
-void dt_lua_unlock(gboolean relock_gdk);
+void dt_lua_lock();
+void dt_lua_unlock();
 
-#define dt_lua_debug_stack(L) dt_lua_debug_stack_internal(L,__FUNCTION__,__LINE__)
-void dt_lua_debug_stack_internal(lua_State *L, const char* function, int line);
-#define dt_lua_debug_table(L,index) dt_lua_debug_table_internal(L,index,__FUNCTION__,__LINE__)
-void dt_lua_debug_table_internal(lua_State * L,int t,const char* function,int line);
+/*
+   call a lua function that is its upvalue, with an unchanged stack
+   the function is called within the gtk thread so it
+   IS NOT ALLOWED TO CALL USER CODE AND SHOULD BE FAST
 
-typedef struct {
-  lua_State* state;
+
+   */
+int dt_lua_gtk_wrap(lua_State*L);
+
+#define dt_lua_debug_stack(L) dt_lua_debug_stack_internal(L, __FUNCTION__, __LINE__)
+void dt_lua_debug_stack_internal(lua_State *L, const char *function, int line);
+#define dt_lua_debug_table(L, index) dt_lua_debug_table_internal(L, index, __FUNCTION__, __LINE__)
+void dt_lua_debug_table_internal(lua_State *L, int t, const char *function, int line);
+
+typedef struct
+{
+  lua_State *state;
   dt_pthread_mutex_t mutex;
+  int pending_threads ;
   bool ending;
 
 } dt_lua_state_t;
@@ -70,11 +81,14 @@ void dt_lua_redraw_screen();
 
 #else
 /* defines to easily have a few lua types when lua is not available */
-typedef int lua_State ;
+typedef int lua_State;
 typedef int (*lua_CFunction)(lua_State *L);
 typedef int luaA_Type;
 #define LUAA_INVALID_TYPE -1
-typedef struct {} dt_lua_state_t;
+typedef struct
+{
+  int unused; // if this is empty clang++ complains that the struct has size 0 in C and size 1 in C++
+} dt_lua_state_t;
 #endif
 
 
@@ -83,4 +97,3 @@ typedef struct {} dt_lua_state_t;
 // modelines: These editor modelines have been set for all relevant files by tools/update_modelines.sh
 // vim: shiftwidth=2 expandtab tabstop=2 cindent
 // kate: tab-indents: off; indent-width 2; replace-tabs on; indent-mode cstyle; remove-trailing-space on;
-

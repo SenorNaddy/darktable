@@ -10,23 +10,23 @@ option(USE_LUA "Build lua scripting support" ON)
 option(DONT_USE_INTERNAL_LUA "Never fall back to the intree copy of lua" ON)
 option(USE_FLICKR "Enable Flickr support" ON)
 option(USE_GLIBJSON "Enable GlibJson support" ON)
+option(USE_KWALLET "Build kwallet password storage back-end" ON)
+option(USE_LIBSECRET "Build libsecret password storage back-end" ON)
 option(USE_GNOME_KEYRING "Build gnome-keyring password storage back-end" ON)
 option(USE_UNITY "Use libunity to report progress in the launcher" OFF)
-option(USE_SQUISH "Use thumbnail compression via libsquish" ON)
 option(BUILD_SLIDESHOW "Build the opengl slideshow viewer" ON)
 option(USE_OPENMP "Use openmp threading support." ON)
 option(USE_OPENCL "Use OpenCL support." ON)
 option(USE_GRAPHICSMAGICK "Use GraphicsMagick library for image import." ON)
 option(USE_DARKTABLE_PROFILING OFF)
 option(CUSTOM_CFLAGS "Don't override compiler optimization flags." OFF)
-option(DONT_USE_RAWSPEED "Don't compile rawspeed back-end." OFF)
 option(BUILD_USERMANUAL "Build all the versions of the usermanual." OFF)
 option(BINARY_PACKAGE_BUILD "Sets march optimization to generic" OFF)
 option(APRIL_FOOLS "Add the \"file manager\" (a shell) to lighttable mode" OFF)
 option(USE_XMLLINT "Run xmllint to test if darktableconfig.xml is valid" ON)
 option(USE_OPENJPEG "Enable JPEG 2000 support" ON)
 option(USE_WEBP "Enable WebP export support" ON)
-option(BUILD_CMSTEST "Build a test program to check your system's color management setup" OFF)
+option(BUILD_CMSTEST "Build a test program to check your system's color management setup" ON)
 option(USE_OPENEXR "Enable OpenEXR support" ON)
 if(APPLE)
 	option(USE_MAC_INTEGRATION "Enable OS X integration" ON)
@@ -93,14 +93,19 @@ endif()
 # Set package version
 #
 if(NOT SOURCE_PACKAGE)
-	message("-- Determining version")
-	EXECUTE_PROCESS(COMMAND git describe --tags HEAD #OUTPUT_VARIABLE PROJECT_VERSION OUTPUT_STRIP_TRAILING_WHITESPACE
-			COMMAND sed "s,^release-,,;s,-,+,;s,-,~,;" OUTPUT_STRIP_TRAILING_WHITESPACE OUTPUT_VARIABLE PROJECT_VERSION
-			WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
-	configure_file("${CMAKE_CURRENT_SOURCE_DIR}/cmake/version.cmake.cmake" "${CMAKE_CURRENT_BINARY_DIR}/version.cmake" @ONLY)
-else(NOT SOURCE_PACKAGE)
-	include(cmake/version.cmake)
-endif()
+  # this part is setting the corresponding CMake variable which gets used for example when creating a source package
+  EXECUTE_PROCESS(COMMAND git describe --tags HEAD #OUTPUT_VARIABLE PROJECT_VERSION OUTPUT_STRIP_TRAILING_WHITESPACE
+      COMMAND sed "s,^release-,,;s,-,+,;s,-,~,;" OUTPUT_STRIP_TRAILING_WHITESPACE OUTPUT_VARIABLE PROJECT_VERSION
+      WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+  # and here we write out the version into a .h file suitable to be used in the code.
+  # the file only gets written when the version is actually different to avoid unneeded recompiles
+  add_custom_target(
+    generate_version ALL
+    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tools/create_version_h.sh ${CMAKE_CURRENT_BINARY_DIR}/src/version_gen.h
+    COMMENT "Updating version string"
+  )
+endif(NOT SOURCE_PACKAGE)
 
 #
 # Initial cmake/debian/postinst and prerm script for debian package

@@ -24,29 +24,28 @@
 #include "gui/gtk.h"
 
 
-void dt_ratings_apply_to_image (int imgid, int rating)
+void dt_ratings_apply_to_image(int imgid, int rating)
 {
-  const dt_image_t *cimg = dt_image_cache_read_get(darktable.image_cache, imgid);
-  dt_image_t *image = dt_image_cache_write_get(darktable.image_cache, cimg);
+  dt_image_t *image = dt_image_cache_get(darktable.image_cache, imgid, 'w');
   // one star is a toggle, so you can easily reject images by removing the last star:
   if(((image->flags & 0x7) == 1) && (rating == 1)) rating = 0;
   image->flags = (image->flags & ~0x7) | (0x7 & rating);
   // synch through:
   dt_image_cache_write_release(darktable.image_cache, image, DT_IMAGE_CACHE_SAFE);
-  dt_image_cache_read_release(darktable.image_cache, image);
 
   dt_collection_hint_message(darktable.collection);
 }
 
-void dt_ratings_apply_to_selection (int rating)
+void dt_ratings_apply_to_selection(int rating)
 {
   uint32_t count = dt_collection_get_selected_count(darktable.collection);
-  if (count)
+  if(count)
   {
     if(rating == 6)
       dt_control_log(ngettext("rejecting %d image", "rejecting %d images", count), count);
     else
-      dt_control_log(ngettext("applying rating %d to %d image", "applying rating %d to %d images", count), rating, count);
+      dt_control_log(ngettext("applying rating %d to %d image", "applying rating %d to %d images", count),
+                     rating, count);
 #if 0 // not updating cache
     gchar query[1024]= {0};
     g_snprintf(query,sizeof(query),
@@ -58,7 +57,8 @@ void dt_ratings_apply_to_selection (int rating)
 
     /* for each selected image update rating */
     sqlite3_stmt *stmt;
-    DT_DEBUG_SQLITE3_PREPARE_V2(dt_database_get(darktable.db), "select imgid from selected_images", -1, &stmt, NULL);
+    DT_DEBUG_SQLITE3_PREPARE_V2(dt_database_get(darktable.db), "select imgid from selected_images", -1, &stmt,
+                                NULL);
     while(sqlite3_step(stmt) == SQLITE_ROW)
     {
       dt_ratings_apply_to_image(sqlite3_column_int(stmt, 0), rating);
@@ -71,7 +71,6 @@ void dt_ratings_apply_to_selection (int rating)
   }
   else
     dt_control_log(_("no images selected to apply rating"));
-
 }
 
 // modelines: These editor modelines have been set for all relevant files by tools/update_modelines.sh

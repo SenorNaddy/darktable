@@ -26,7 +26,7 @@
 #include "common/colorspaces.h"
 #include "control/conf.h"
 #include "common/imageio_format.h"
-#include "dtgtk/slider.h"
+#include "bauhaus/bauhaus.h"
 #include <setjmp.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -38,27 +38,26 @@
 #undef HAVE_STDLIB_H
 #undef HAVE_STDDEF_H
 
-DT_MODULE(1)
+DT_MODULE(2)
 
 typedef struct dt_imageio_jpeg_t
 {
   int max_width, max_height;
   int width, height;
   char style[128];
+  gboolean style_append;
   int quality;
   struct jpeg_source_mgr src;
   struct jpeg_destination_mgr dest;
   struct jpeg_decompress_struct dinfo;
-  struct jpeg_compress_struct   cinfo;
+  struct jpeg_compress_struct cinfo;
   FILE *f;
-}
-dt_imageio_jpeg_t;
+} dt_imageio_jpeg_t;
 
 typedef struct dt_imageio_jpeg_gui_data_t
 {
-  GtkDarktableSlider *quality;
-}
-dt_imageio_jpeg_gui_data_t;
+  GtkWidget *quality;
+} dt_imageio_jpeg_gui_data_t;
 
 
 // error functions
@@ -66,16 +65,14 @@ struct dt_imageio_jpeg_error_mgr
 {
   struct jpeg_error_mgr pub;
   jmp_buf setjmp_buffer;
-}
-dt_imageio_jpeg_error_mgr;
+} dt_imageio_jpeg_error_mgr;
 
 typedef struct dt_imageio_jpeg_error_mgr *dt_imageio_jpeg_error_ptr;
 
-static void
-dt_imageio_jpeg_error_exit (j_common_ptr cinfo)
+static void dt_imageio_jpeg_error_exit(j_common_ptr cinfo)
 {
-  dt_imageio_jpeg_error_ptr myerr = (dt_imageio_jpeg_error_ptr) cinfo->err;
-  (*cinfo->err->output_message) (cinfo);
+  const dt_imageio_jpeg_error_ptr myerr = (dt_imageio_jpeg_error_ptr)cinfo->err;
+  (*cinfo->err->output_message)(cinfo);
   longjmp(myerr->setjmp_buffer, 1);
 }
 
@@ -92,10 +89,10 @@ dt_imageio_jpeg_error_exit (j_common_ptr cinfo)
  * rather than assuming that the APP2 markers appear in the correct sequence.
  */
 
-#define ICC_MARKER  (JPEG_APP0 + 2)	/* JPEG marker code for ICC */
-#define ICC_OVERHEAD_LEN  14		/* size of non-profile data in APP2 */
-#define MAX_BYTES_IN_MARKER  65533	/* maximum data len of a JPEG marker */
-#define MAX_DATA_BYTES_IN_MARKER  (MAX_BYTES_IN_MARKER - ICC_OVERHEAD_LEN)
+#define ICC_MARKER (JPEG_APP0 + 2) /* JPEG marker code for ICC */
+#define ICC_OVERHEAD_LEN 14        /* size of non-profile data in APP2 */
+#define MAX_BYTES_IN_MARKER 65533  /* maximum data len of a JPEG marker */
+#define MAX_DATA_BYTES_IN_MARKER (MAX_BYTES_IN_MARKER - ICC_OVERHEAD_LEN)
 
 
 /*
@@ -106,31 +103,25 @@ dt_imageio_jpeg_error_exit (j_common_ptr cinfo)
  * SOI and JFIF or Adobe markers, but before all else.)
  */
 
-static void
-write_icc_profile (j_compress_ptr cinfo,
-                   const JOCTET *icc_data_ptr,
-                   unsigned int icc_data_len)
+static void write_icc_profile(j_compress_ptr cinfo, const JOCTET *icc_data_ptr, unsigned int icc_data_len)
 {
-  unsigned int num_markers;	/* total number of markers we'll write */
-  int cur_marker = 1;		/* per spec, counting starts at 1 */
-  unsigned int length;		/* number of bytes to write in this marker */
+  unsigned int num_markers; /* total number of markers we'll write */
+  int cur_marker = 1;       /* per spec, counting starts at 1 */
+  unsigned int length;      /* number of bytes to write in this marker */
 
   /* Calculate the number of markers we'll need, rounding up of course */
   num_markers = icc_data_len / MAX_DATA_BYTES_IN_MARKER;
-  if (num_markers * MAX_DATA_BYTES_IN_MARKER != icc_data_len)
-    num_markers++;
+  if(num_markers * MAX_DATA_BYTES_IN_MARKER != icc_data_len) num_markers++;
 
-  while (icc_data_len > 0)
+  while(icc_data_len > 0)
   {
     /* length of profile to put in this marker */
     length = icc_data_len;
-    if (length > MAX_DATA_BYTES_IN_MARKER)
-      length = MAX_DATA_BYTES_IN_MARKER;
+    if(length > MAX_DATA_BYTES_IN_MARKER) length = MAX_DATA_BYTES_IN_MARKER;
     icc_data_len -= length;
 
     /* Write the JPEG marker header (APP2 code and marker length) */
-    jpeg_write_m_header(cinfo, ICC_MARKER,
-                        (unsigned int) (length + ICC_OVERHEAD_LEN));
+    jpeg_write_m_header(cinfo, ICC_MARKER, (unsigned int)(length + ICC_OVERHEAD_LEN));
 
     /* Write the marker identifying string "ICC_PROFILE" (null-terminated).
      * We code it in this less-than-transparent way so that the code works
@@ -151,10 +142,10 @@ write_icc_profile (j_compress_ptr cinfo,
 
     /* Add the sequencing info */
     jpeg_write_m_byte(cinfo, cur_marker);
-    jpeg_write_m_byte(cinfo, (int) num_markers);
+    jpeg_write_m_byte(cinfo, (int)num_markers);
 
     /* Add the profile data */
-    while (length--)
+    while(length--)
     {
       jpeg_write_m_byte(cinfo, *icc_data_ptr);
       icc_data_ptr++;
@@ -232,7 +223,7 @@ read_icc_profile (j_decompress_ptr cinfo,
   int seq_no;
   JOCTET *icc_data;
   unsigned int total_length;
-#define MAX_SEQ_NO  255		/* sufficient since marker numbers are bytes */
+#define MAX_SEQ_NO 255 /* sufficient since marker numbers are bytes */
   char marker_present[MAX_SEQ_NO+1];	  /* 1 if marker found */
   unsigned int data_length[MAX_SEQ_NO+1]; /* size of profile data in marker */
   unsigned int data_offset[MAX_SEQ_NO+1]; /* offset for data in marker */
@@ -321,16 +312,16 @@ read_icc_profile (j_decompress_ptr cinfo,
 #undef MAX_SEQ_NO
 
 
-int
-write_image (dt_imageio_module_data_t *jpg_tmp, const char *filename, const void *in_tmp, void *exif, int exif_len, int imgid)
+int write_image(dt_imageio_module_data_t *jpg_tmp, const char *filename, const void *in_tmp, void *exif,
+                int exif_len, int imgid, int num, int total)
 {
-  dt_imageio_jpeg_t *jpg = (dt_imageio_jpeg_t*)jpg_tmp;
-  const uint8_t*in =(const uint8_t*)in_tmp;
+  dt_imageio_jpeg_t *jpg = (dt_imageio_jpeg_t *)jpg_tmp;
+  const uint8_t *in = (const uint8_t *)in_tmp;
   struct dt_imageio_jpeg_error_mgr jerr;
 
   jpg->cinfo.err = jpeg_std_error(&jerr.pub);
   jerr.pub.error_exit = dt_imageio_jpeg_error_exit;
-  if (setjmp(jerr.setjmp_buffer))
+  if(setjmp(jerr.setjmp_buffer))
   {
     jpeg_destroy_compress(&(jpg->cinfo));
     return 1;
@@ -355,6 +346,24 @@ write_image (dt_imageio_module_data_t *jpg_tmp, const char *filename, const void
   if(jpg->quality < 40) jpg->cinfo.smoothing_factor = 60;
   jpg->cinfo.optimize_coding = 1;
 
+  // according to specs density_unit = 0, X_density = 1, Y_density = 1 should be fine and valid since it
+  // describes an image with unknown unit and square pixels.
+  // however, some applications (like the Telekom cloud thingy) seem to be confused by that, so let's set
+  // these calues to the same as stored in exiv :/
+  const int resolution = dt_conf_get_int("metadata/resolution");
+  if(resolution > 0)
+  {
+    jpg->cinfo.density_unit = 1;
+    jpg->cinfo.X_density = resolution;
+    jpg->cinfo.Y_density = resolution;
+  }
+  else
+  {
+    jpg->cinfo.density_unit = 0;
+    jpg->cinfo.X_density = 1;
+    jpg->cinfo.Y_density = 1;
+  }
+
   jpeg_start_compress(&(jpg->cinfo), TRUE);
 
   if(imgid > 0)
@@ -362,7 +371,7 @@ write_image (dt_imageio_module_data_t *jpg_tmp, const char *filename, const void
     cmsHPROFILE out_profile = dt_colorspaces_create_output_profile(imgid);
     uint32_t len = 0;
     cmsSaveProfileToMem(out_profile, 0, &len);
-    if (len > 0)
+    if(len > 0)
     {
       unsigned char buf[len];
       cmsSaveProfileToMem(out_profile, buf, &len);
@@ -372,19 +381,20 @@ write_image (dt_imageio_module_data_t *jpg_tmp, const char *filename, const void
   }
 
   if(exif && exif_len > 0 && exif_len < 65534)
-    jpeg_write_marker(&(jpg->cinfo), JPEG_APP0+1, exif, exif_len);
+    jpeg_write_marker(&(jpg->cinfo), JPEG_APP0 + 1, exif, exif_len);
 
-  uint8_t row[3*jpg->width];
+  uint8_t row[3 * jpg->width];
   const uint8_t *buf;
   while(jpg->cinfo.next_scanline < jpg->cinfo.image_height)
   {
     JSAMPROW tmp[1];
     buf = in + (size_t)jpg->cinfo.next_scanline * jpg->cinfo.image_width * 4;
-    for(int i=0; i<jpg->width; i++) for(int k=0; k<3; k++) row[3*i+k] = buf[4*i+k];
+    for(int i = 0; i < jpg->width; i++)
+      for(int k = 0; k < 3; k++) row[3 * i + k] = buf[4 * i + k];
     tmp[0] = row;
     jpeg_write_scanlines(&(jpg->cinfo), tmp, 1);
   }
-  jpeg_finish_compress (&(jpg->cinfo));
+  jpeg_finish_compress(&(jpg->cinfo));
   jpeg_destroy_compress(&(jpg->cinfo));
   fclose(f);
   return 0;
@@ -398,7 +408,7 @@ int read_header(const char *filename, dt_imageio_jpeg_t *jpg)
   struct dt_imageio_jpeg_error_mgr jerr;
   jpg->dinfo.err = jpeg_std_error(&jerr.pub);
   jerr.pub.error_exit = dt_imageio_jpeg_error_exit;
-  if (setjmp(jerr.setjmp_buffer))
+  if(setjmp(jerr.setjmp_buffer))
   {
     jpeg_destroy_decompress(&(jpg->dinfo));
     fclose(jpg->f);
@@ -408,17 +418,17 @@ int read_header(const char *filename, dt_imageio_jpeg_t *jpg)
   jpeg_stdio_src(&(jpg->dinfo), jpg->f);
   // jpg->dinfo.buffered_image = TRUE;
   jpeg_read_header(&(jpg->dinfo), TRUE);
-  jpg->width  = jpg->dinfo.image_width;
+  jpg->width = jpg->dinfo.image_width;
   jpg->height = jpg->dinfo.image_height;
   return 0;
 }
 
-int read_image (dt_imageio_module_data_t *jpg_tmp, uint8_t *out)
+int read_image(dt_imageio_module_data_t *jpg_tmp, uint8_t *out)
 {
-  dt_imageio_jpeg_t *jpg = (dt_imageio_jpeg_t*)jpg_tmp;
+  dt_imageio_jpeg_t *jpg = (dt_imageio_jpeg_t *)jpg_tmp;
   struct dt_imageio_jpeg_error_mgr jerr;
   jpg->dinfo.err = jpeg_std_error(&jerr.pub);
-  if (setjmp(jerr.setjmp_buffer))
+  if(setjmp(jerr.setjmp_buffer))
   {
     jpeg_destroy_decompress(&(jpg->dinfo));
     fclose(jpg->f);
@@ -426,34 +436,72 @@ int read_image (dt_imageio_module_data_t *jpg_tmp, uint8_t *out)
   }
   (void)jpeg_start_decompress(&(jpg->dinfo));
   JSAMPROW row_pointer[1];
-  row_pointer[0] = (uint8_t *)malloc((size_t)jpg->dinfo.output_width*jpg->dinfo.num_components);
+  row_pointer[0] = (uint8_t *)malloc((size_t)jpg->dinfo.output_width * jpg->dinfo.num_components);
   uint8_t *tmp = out;
   while(jpg->dinfo.output_scanline < jpg->dinfo.image_height)
   {
     if(jpeg_read_scanlines(&(jpg->dinfo), row_pointer, 1) != 1) return 1;
     if(jpg->dinfo.num_components < 3)
-      for(JDIMENSION i=0; i<jpg->dinfo.image_width; i++) for(int k=0; k<3; k++)
-          tmp[4*i+k] = row_pointer[0][jpg->dinfo.num_components*i+0];
+      for(JDIMENSION i = 0; i < jpg->dinfo.image_width; i++)
+        for(int k = 0; k < 3; k++) tmp[4 * i + k] = row_pointer[0][jpg->dinfo.num_components * i + 0];
     else
-      for(JDIMENSION i=0; i<jpg->dinfo.image_width; i++) for(int k=0; k<3; k++)
-          tmp[4*i+k] = row_pointer[0][3*i+k];
-    tmp += 4*jpg->width;
+      for(JDIMENSION i = 0; i < jpg->dinfo.image_width; i++)
+        for(int k = 0; k < 3; k++) tmp[4 * i + k] = row_pointer[0][3 * i + k];
+    tmp += 4 * jpg->width;
   }
-  // (void)jpeg_finish_decompress(&(jpg->dinfo));
+  (void)jpeg_finish_decompress(&(jpg->dinfo));
   jpeg_destroy_decompress(&(jpg->dinfo));
   free(row_pointer[0]);
   fclose(jpg->f);
   return 0;
 }
 
-size_t
-params_size(dt_imageio_module_format_t *self)
+size_t params_size(dt_imageio_module_format_t *self)
 {
   return sizeof(dt_imageio_module_data_t) + sizeof(int);
 }
 
-void*
-get_params(dt_imageio_module_format_t *self)
+void *legacy_params(dt_imageio_module_format_t *self, const void *const old_params,
+                    const size_t old_params_size, const int old_version, const int new_version,
+                    size_t *new_size)
+{
+  if(old_version == 1 && new_version == 2)
+  {
+    typedef struct dt_imageio_jpeg_v1_t
+    {
+      int max_width, max_height;
+      int width, height;
+      char style[128];
+      int quality;
+      struct jpeg_source_mgr src;
+      struct jpeg_destination_mgr dest;
+      struct jpeg_decompress_struct dinfo;
+      struct jpeg_compress_struct cinfo;
+      FILE *f;
+    } dt_imageio_jpeg_v1_t;
+
+    const dt_imageio_jpeg_v1_t *o = (dt_imageio_jpeg_v1_t *)old_params;
+    dt_imageio_jpeg_t *n = (dt_imageio_jpeg_t *)malloc(sizeof(dt_imageio_jpeg_t));
+
+    n->max_width = o->max_width;
+    n->max_height = o->max_height;
+    n->width = o->width;
+    n->height = o->height;
+    g_strlcpy(n->style, o->style, sizeof(o->style));
+    n->style_append = 0;
+    n->quality = o->quality;
+    n->src = o->src;
+    n->dest = o->dest;
+    n->dinfo = o->dinfo;
+    n->cinfo = o->cinfo;
+    n->f = o->f;
+    *new_size = self->params_size(self);
+    return n;
+  }
+  return NULL;
+}
+
+void *get_params(dt_imageio_module_format_t *self)
 {
   // adjust this if more params are stored (subsampling etc)
   dt_imageio_jpeg_t *d = (dt_imageio_jpeg_t *)calloc(1, sizeof(dt_imageio_jpeg_t));
@@ -462,48 +510,41 @@ get_params(dt_imageio_module_format_t *self)
   return d;
 }
 
-void
-free_params(dt_imageio_module_format_t *self, dt_imageio_module_data_t *params)
+void free_params(dt_imageio_module_format_t *self, dt_imageio_module_data_t *params)
 {
   free(params);
 }
 
-int
-set_params(dt_imageio_module_format_t *self, const void *params, const int size)
+int set_params(dt_imageio_module_format_t *self, const void *params, const int size)
 {
   if(size != self->params_size(self)) return 1;
-  dt_imageio_jpeg_t *d = (dt_imageio_jpeg_t *)params;
+  const dt_imageio_jpeg_t *d = (dt_imageio_jpeg_t *)params;
   dt_imageio_jpeg_gui_data_t *g = (dt_imageio_jpeg_gui_data_t *)self->gui_data;
-  dtgtk_slider_set_value(g->quality, d->quality);
+  dt_bauhaus_slider_set(g->quality, d->quality);
   return 0;
 }
 
-int
-bpp(dt_imageio_module_data_t *p)
+int bpp(dt_imageio_module_data_t *p)
 {
   return 8;
 }
 
-int
-levels(dt_imageio_module_data_t *p)
+int levels(dt_imageio_module_data_t *p)
 {
   return IMAGEIO_RGB | IMAGEIO_INT8;
 }
 
-const char*
-mime(dt_imageio_module_data_t *data)
+const char *mime(dt_imageio_module_data_t *data)
 {
   return "image/jpeg";
 }
 
-const char*
-extension(dt_imageio_module_data_t *data)
+const char *extension(dt_imageio_module_data_t *data)
 {
   return "jpg";
 }
 
-int
-flags(dt_imageio_module_data_t *data)
+int flags(dt_imageio_module_data_t *data)
 {
   return FORMAT_FLAGS_SUPPORT_XMP;
 }
@@ -511,56 +552,53 @@ flags(dt_imageio_module_data_t *data)
 void init(dt_imageio_module_format_t *self)
 {
 #ifdef USE_LUA
-  dt_lua_register_module_member(darktable.lua_state.state,self,dt_imageio_jpeg_t,quality,int);
+  dt_lua_register_module_member(darktable.lua_state.state, self, dt_imageio_jpeg_t, quality, int);
 #endif
 }
-void cleanup(dt_imageio_module_format_t *self) {}
+void cleanup(dt_imageio_module_format_t *self)
+{
+}
 
 // =============================================================================
 //  gui stuff:
 // =============================================================================
 
-const char*
-name ()
+const char *name()
 {
   return _("JPEG (8-bit)");
 }
 
-static void
-quality_changed (GtkDarktableSlider *slider, gpointer user_data)
+static void quality_changed(GtkWidget *slider, gpointer user_data)
 {
-  int quality = (int)dtgtk_slider_get_value(slider);
-  dt_conf_set_int ("plugins/imageio/format/jpeg/quality", quality);
+  const int quality = (int)dt_bauhaus_slider_get(slider);
+  dt_conf_set_int("plugins/imageio/format/jpeg/quality", quality);
 }
 
-void
-gui_init (dt_imageio_module_format_t *self)
+void gui_init(dt_imageio_module_format_t *self)
 {
   dt_imageio_jpeg_gui_data_t *g = (dt_imageio_jpeg_gui_data_t *)malloc(sizeof(dt_imageio_jpeg_gui_data_t));
   self->gui_data = g;
   // construct gui with jpeg specific options:
-  GtkWidget *box = gtk_hbox_new(FALSE, 20);
+  GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 20);
   self->widget = box;
   // quality slider
-  g->quality = DTGTK_SLIDER(dtgtk_slider_new_with_range(DARKTABLE_SLIDER_BAR, 5, 100, 1, 95, 0));
-  dtgtk_slider_set_label(g->quality,_("quality"));
-  dtgtk_slider_set_default_value(g->quality, 95);
+  g->quality = dt_bauhaus_slider_new_with_range(NULL, 5, 100, 1, 95, 0);
+  dt_bauhaus_widget_set_label(g->quality, NULL, _("quality"));
+  dt_bauhaus_slider_set_default(g->quality, 95);
   gtk_box_pack_start(GTK_BOX(box), GTK_WIDGET(g->quality), TRUE, TRUE, 0);
-  g_signal_connect (G_OBJECT (g->quality), "value-changed",
-                    G_CALLBACK (quality_changed),
-                    NULL);
+  g_signal_connect(G_OBJECT(g->quality), "value-changed", G_CALLBACK(quality_changed), NULL);
   // TODO: add more options: subsample dreggn
 }
 
-void gui_cleanup (dt_imageio_module_format_t *self)
+void gui_cleanup(dt_imageio_module_format_t *self)
 {
   free(self->gui_data);
 }
 
-void gui_reset (dt_imageio_module_format_t *self)
+void gui_reset(dt_imageio_module_format_t *self)
 {
   dt_imageio_jpeg_gui_data_t *g = (dt_imageio_jpeg_gui_data_t *)self->gui_data;
-  dtgtk_slider_set_value(g->quality, dt_conf_get_int("plugins/imageio/format/jpeg/quality"));
+  dt_bauhaus_slider_set(g->quality, dt_conf_get_int("plugins/imageio/format/jpeg/quality"));
 }
 
 // modelines: These editor modelines have been set for all relevant files by tools/update_modelines.sh

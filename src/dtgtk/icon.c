@@ -19,91 +19,51 @@
 #include "icon.h"
 #include "gui/gtk.h"
 
-static void _icon_class_init (GtkDarktableIconClass *klass);
-static void _icon_init (GtkDarktableIcon *icon);
-static void _icon_size_request (GtkWidget *widget, GtkRequisition *requisition);
-static gboolean _icon_expose (GtkWidget *widget, GdkEventExpose *event);
+static void _icon_class_init(GtkDarktableIconClass *klass);
+static void _icon_init(GtkDarktableIcon *icon);
+static gboolean _icon_draw(GtkWidget *widget, cairo_t *cr);
 
 
-static void
-_icon_class_init (GtkDarktableIconClass *klass)
+static void _icon_class_init(GtkDarktableIconClass *klass)
 {
-  GtkWidgetClass *widget_class=(GtkWidgetClass *) klass;
-  widget_class->size_request = _icon_size_request;
-  widget_class->expose_event = _icon_expose;
+  GtkWidgetClass *widget_class = (GtkWidgetClass *)klass;
+  widget_class->draw = _icon_draw;
 }
 
-static void
-_icon_init(GtkDarktableIcon *icon)
+static void _icon_init(GtkDarktableIcon *icon)
 {
 }
 
-static void
-_icon_size_request(GtkWidget *widget,GtkRequisition *requisition)
+static gboolean _icon_draw(GtkWidget *widget, cairo_t *cr)
 {
-  g_return_if_fail (widget != NULL);
-  g_return_if_fail (DTGTK_IS_ICON(widget));
-  g_return_if_fail (requisition != NULL);
-  requisition->width = DT_PIXEL_APPLY_DPI(17);
-  requisition->height = DT_PIXEL_APPLY_DPI(17);
-}
-
-static gboolean
-_icon_expose (GtkWidget *widget, GdkEventExpose *event)
-{
-  g_return_val_if_fail (widget != NULL, FALSE);
-  g_return_val_if_fail (DTGTK_IS_ICON(widget), FALSE);
-  g_return_val_if_fail (event != NULL, FALSE);
-  GtkStyle *style=gtk_widget_get_style(widget);
-  int state = gtk_widget_get_state(widget);
-  int border = 0;
-
-  /* update paint flags depending of states */
-  int flags = DTGTK_ICON(widget)->icon_flags;
-
+  g_return_val_if_fail(widget != NULL, FALSE);
+  g_return_val_if_fail(DTGTK_IS_ICON(widget), FALSE);
 
   /* begin cairo drawing */
-  cairo_t *cr;
-  cr = gdk_cairo_create (gtk_widget_get_window(widget));
-
   GtkAllocation allocation;
   gtk_widget_get_allocation(widget, &allocation);
-  int x = allocation.x;
-  int y = allocation.y;
-  int width = allocation.width;
-  int height = allocation.height;
 
-  /*
-      cairo_rectangle (cr,x,y,width,height);
-      cairo_set_source_rgba (cr,
-                             style->bg[state].red/65535.0,
-                             style->bg[state].green/65535.0,
-                             style->bg[state].blue/65535.0,
-                             0.5);
-      cairo_fill (cr);
-  */
+  GtkStateFlags state = gtk_widget_get_state_flags(widget);
 
-  cairo_set_source_rgb (cr,
-                        style->fg[state].red/65535.0,
-                        style->fg[state].green/65535.0,
-                        style->fg[state].blue/65535.0);
+  GdkRGBA fg_color;
+  GtkStyleContext *context = gtk_widget_get_style_context(widget);
+  gtk_style_context_get_color(context, state, &fg_color);
+
+  gdk_cairo_set_source_rgba(cr, &fg_color);
 
   /* draw icon */
-  if (DTGTK_ICON(widget)->icon)
-    DTGTK_ICON(widget)->icon(cr, x+border, y+border, width-(border*2), height-(border*2), flags);
-
-  cairo_destroy (cr);
+  if(DTGTK_ICON(widget)->icon)
+    DTGTK_ICON(widget)->icon(cr, 0, 0, allocation.width, allocation.height, DTGTK_ICON(widget)->icon_flags);
 
   return FALSE;
 }
 
 // Public functions
-GtkWidget*
-dtgtk_icon_new (DTGTKCairoPaintIconFunc paint, gint paintflags)
+GtkWidget *dtgtk_icon_new(DTGTKCairoPaintIconFunc paint, gint paintflags)
 {
   GtkDarktableIcon *icon;
   icon = g_object_new(dtgtk_icon_get_type(), NULL);
-  gtk_event_box_set_visible_window(GTK_EVENT_BOX(icon),FALSE);
+  gtk_event_box_set_visible_window(GTK_EVENT_BOX(icon), FALSE);
   icon->icon = paint;
   icon->icon_flags = paintflags;
   return (GtkWidget *)icon;
@@ -112,28 +72,21 @@ dtgtk_icon_new (DTGTKCairoPaintIconFunc paint, gint paintflags)
 GType dtgtk_icon_get_type()
 {
   static GType dtgtk_icon_type = 0;
-  if (!dtgtk_icon_type)
+  if(!dtgtk_icon_type)
   {
-    static const GTypeInfo dtgtk_icon_info =
-    {
-      sizeof(GtkDarktableIconClass),
-      (GBaseInitFunc) NULL,
-      (GBaseFinalizeFunc) NULL,
-      (GClassInitFunc) _icon_class_init,
-      NULL,           /* class_finalize */
-      NULL,           /* class_data */
-      sizeof(GtkDarktableIcon),
-      0,              /* n_preallocs */
-      (GInstanceInitFunc) _icon_init,
+    static const GTypeInfo dtgtk_icon_info = {
+      sizeof(GtkDarktableIconClass), (GBaseInitFunc)NULL, (GBaseFinalizeFunc)NULL,
+      (GClassInitFunc)_icon_class_init, NULL, /* class_finalize */
+      NULL,                                   /* class_data */
+      sizeof(GtkDarktableIcon), 0,            /* n_preallocs */
+      (GInstanceInitFunc)_icon_init,
     };
     dtgtk_icon_type = g_type_register_static(GTK_TYPE_EVENT_BOX, "GtkDarktableIcon", &dtgtk_icon_info, 0);
   }
   return dtgtk_icon_type;
 }
 
-void dtgtk_icon_set_paint(GtkWidget *icon,
-                          DTGTKCairoPaintIconFunc paint,
-                          gint paintflags)
+void dtgtk_icon_set_paint(GtkWidget *icon, DTGTKCairoPaintIconFunc paint, gint paintflags)
 {
   DTGTK_ICON(icon)->icon = paint;
   DTGTK_ICON(icon)->icon_flags = paintflags;

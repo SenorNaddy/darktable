@@ -17,7 +17,7 @@
 */
 
 #include "dtgtk/button.h"
-#include "dtgtk/label.h"
+#include "bauhaus/bauhaus.h"
 #include "gui/gtk.h"
 #include "common/darktable.h"
 #include "common/image.h"
@@ -48,7 +48,7 @@ typedef struct _flickr_api_context_t
   gboolean needsReauthentication;
 
   /** Current album used when posting images... */
-  flickcurl_photoset  *current_album;
+  flickcurl_photoset *current_album;
 
   char *album_title;
   char *album_summary;
@@ -61,14 +61,11 @@ typedef struct _flickr_api_context_t
 typedef struct dt_storage_flickr_gui_data_t
 {
 
-  GtkLabel *label1,*label2,*label3, *label4,*label5,*label6,*label7,*labelPerms;    // username, password, albums, status, albumtitle, albumsummary, albumrights
-  GtkEntry *entry1,*entry2,*entry3,*entry4;                             // username, password, albumtitle,albumsummary
-  GtkComboBoxText *comboBox1;                                               // album box
-  GtkCheckButton *checkButton2;                                         // export tags
-  GtkDarktableButton *dtbutton1;                                        // refresh albums
-  GtkButton *button;                                                    // login button. These buttons call the same functions
-  GtkBox *hbox1;                                                        // Create album options...
-  GtkComboBoxText *permsComboBox;                                           // Permissions for flickr
+  GtkLabel *status_label;
+  GtkEntry *user_entry, *title_entry, *summary_entry;
+  GtkWidget *export_tags;
+  GtkBox *create_box;                               // Create album options...
+  GtkWidget *permission_list, *album_list;
 
   char *user_token;
 
@@ -95,26 +92,26 @@ typedef struct dt_storage_flickr_params_t
 /** Authenticates and retrieves an initialized flickr api object */
 static _flickr_api_context_t *_flickr_api_authenticate(dt_storage_flickr_gui_data_t *ui);
 
-static flickcurl_upload_status *_flickr_api_upload_photo(dt_storage_flickr_params_t *params, char *data, char *caption, char *description, gint imgid);
+static flickcurl_upload_status *_flickr_api_upload_photo(dt_storage_flickr_params_t *params, char *data,
+                                                         char *caption, char *description, gint imgid);
 
-static void _flickr_api_free( _flickr_api_context_t *ctx )
+static void _flickr_api_free(_flickr_api_context_t *ctx)
 {
 
-  g_free( ctx->album_title );
-  g_free( ctx->album_summary );
+  g_free(ctx->album_title);
+  g_free(ctx->album_summary);
 
-  if (ctx->current_album != NULL)
-    flickcurl_free_photoset (ctx->current_album);
+  if(ctx->current_album != NULL) flickcurl_free_photoset(ctx->current_album);
 
-  flickcurl_free (ctx->fc);
+  flickcurl_free(ctx->fc);
 
-  g_free( ctx );
+  g_free(ctx);
 }
 
 static void _flickr_api_error_handler(void *data, const char *message)
 {
   dt_control_log(_("flickr authentication: %s"), message);
-  if (data)
+  if(data)
   {
     _flickr_api_context_t *ctx = (_flickr_api_context_t *)data;
     ctx->error_occured = 1;
@@ -129,32 +126,31 @@ static _flickr_api_context_t *_flickr_api_authenticate(dt_storage_flickr_gui_dat
   gint result;
   _flickr_api_context_t *ctx = (_flickr_api_context_t *)g_malloc0(sizeof(_flickr_api_context_t));
 
-  flickcurl_init ();
-  ctx->fc = flickcurl_new ();
-  flickcurl_set_api_key (ctx->fc, API_KEY);
-  flickcurl_set_shared_secret (ctx->fc, SHARED_SECRET);
+  flickcurl_init();
+  ctx->fc = flickcurl_new();
+  flickcurl_set_api_key(ctx->fc, API_KEY);
+  flickcurl_set_shared_secret(ctx->fc, SHARED_SECRET);
   flickcurl_set_error_handler(ctx->fc, _flickr_api_error_handler, ctx);
 
-  if (!ui->user_token)
+  if(!ui->user_token)
   {
     // Retrieve stored auth_key
     // TODO: We should be able to store token for different users
-    GHashTable* table = dt_pwstorage_get("flickr");
-    gchar * _username = g_strdup( g_hash_table_lookup(table, "username"));
-    gchar *_user_token = g_strdup( g_hash_table_lookup(table, "token"));
+    GHashTable *table = dt_pwstorage_get("flickr");
+    gchar *_username = g_strdup(g_hash_table_lookup(table, "username"));
+    gchar *_user_token = g_strdup(g_hash_table_lookup(table, "token"));
     g_hash_table_destroy(table);
 
-    if (_username)
+    if(_username)
     {
-      if (!strcmp(_username,gtk_entry_get_text(ui->entry1)))
+      if(!strcmp(_username, gtk_entry_get_text(ui->user_entry)))
       {
         flickr_user_token = g_strdup(_user_token);
         perms = flickcurl_auth_checkToken(ctx->fc, flickr_user_token);
       }
-      g_free (_username);
+      g_free(_username);
     }
-    if (_user_token)
-      g_free (_user_token);
+    g_free(_user_token);
   }
   else
   {
@@ -163,23 +159,24 @@ static _flickr_api_context_t *_flickr_api_authenticate(dt_storage_flickr_gui_dat
   }
 
 
-  if (perms)
+  if(perms)
   {
     ui->user_token = flickr_user_token;
     flickcurl_set_auth_token(ctx->fc, flickr_user_token);
     return ctx;
-
   }
-  else if (!ctx->error_occured)
+  else if(!ctx->error_occured)
   {
     frob = flickcurl_auth_getFrob(ctx->fc);
     GError *error = NULL;
-    char *sign = g_strdup_printf ("%sapi_key%sfrob%spermswrite", SHARED_SECRET, API_KEY, frob);
-    char *sign_md5 = g_compute_checksum_for_string (G_CHECKSUM_MD5, sign, strlen (sign));
+    char *sign = g_strdup_printf("%sapi_key%sfrob%spermswrite", SHARED_SECRET, API_KEY, frob);
+    char *sign_md5 = g_compute_checksum_for_string(G_CHECKSUM_MD5, sign, strlen(sign));
     gchar auth_url[250];
-    snprintf(auth_url, sizeof(auth_url), "https://flickr.com/services/auth/?api_key=%s&perms=write&frob=%s&api_sig=%s", API_KEY, frob, sign_md5);
+    snprintf(auth_url, sizeof(auth_url),
+             "https://flickr.com/services/auth/?api_key=%s&perms=write&frob=%s&api_sig=%s", API_KEY, frob,
+             sign_md5);
 
-    if(!gtk_show_uri (gdk_screen_get_default(), auth_url, gtk_get_current_event_time (), &error))
+    if(!gtk_show_uri(gdk_screen_get_default(), auth_url, gtk_get_current_event_time(), &error))
     {
       fprintf(stderr, "[flickr] error opening browser: %s\n", error->message);
       g_error_free(error);
@@ -191,34 +188,33 @@ static _flickr_api_context_t *_flickr_api_authenticate(dt_storage_flickr_gui_dat
     // Hold here to let the user interact
     // Show a dialog.
     gchar *text1, *text2;
-    text1 = g_strdup(_("step 1: a new window or tab of your browser should have been loaded. you have to login into your flickr account there and authorize darktable to upload photos before continuing."));
+    text1 = g_strdup(
+        _("step 1: a new window or tab of your browser should have been loaded. you have to login into your "
+          "flickr account there and authorize darktable to upload photos before continuing."));
     text2 = g_strdup(_("step 2: click the OK button once you are done."));
 
     GtkWidget *window = dt_ui_main_window(darktable.gui->ui);
-    GtkWidget *flickr_auth_dialog = gtk_message_dialog_new (GTK_WINDOW (window),
-                                    GTK_DIALOG_DESTROY_WITH_PARENT,
-                                    GTK_MESSAGE_INFO,
-                                    GTK_BUTTONS_OK_CANCEL,
-                                    _("flickr authentication"));
-    gtk_message_dialog_format_secondary_text (GTK_MESSAGE_DIALOG (flickr_auth_dialog),
-        "%s\n\n%s", text1, text2);
+    GtkWidget *flickr_auth_dialog
+        = gtk_message_dialog_new(GTK_WINDOW(window), GTK_DIALOG_DESTROY_WITH_PARENT, GTK_MESSAGE_INFO,
+                                 GTK_BUTTONS_OK_CANCEL, _("flickr authentication"));
+    gtk_message_dialog_format_secondary_text(GTK_MESSAGE_DIALOG(flickr_auth_dialog), "%s\n\n%s", text1, text2);
 
-    result = gtk_dialog_run (GTK_DIALOG (flickr_auth_dialog));
+    result = gtk_dialog_run(GTK_DIALOG(flickr_auth_dialog));
 
     gtk_widget_destroy(flickr_auth_dialog);
 
-    g_free (text1);
-    g_free (text2);
+    g_free(text1);
+    g_free(text2);
 
-    switch (result)
+    switch(result)
     {
       case GTK_RESPONSE_OK:
         token = flickcurl_auth_getToken(ctx->fc, frob);
         g_free(frob);
         // TODO: Handle timeouts errors
-        if (token)
+        if(token)
         {
-          flickr_user_token = g_strdup (token);
+          flickr_user_token = g_strdup(token);
         }
         else
         {
@@ -231,14 +227,14 @@ static _flickr_api_context_t *_flickr_api_authenticate(dt_storage_flickr_gui_dat
 
         /* Add creds to pwstorage */
         GHashTable *table = g_hash_table_new(g_str_hash, g_str_equal);
-        gchar* username = g_strdup(gtk_entry_get_text(ui->entry1));
+        gchar *username = (gchar *)gtk_entry_get_text(ui->user_entry);
 
         g_hash_table_insert(table, "username", username);
         g_hash_table_insert(table, "token", flickr_user_token);
 
-        if( !dt_pwstorage_set("flickr", table) )
+        if(!dt_pwstorage_set("flickr", table))
         {
-          dt_print(DT_DEBUG_PWSTORAGE,"[flickr] cannot store username/token\n");
+          dt_print(DT_DEBUG_PWSTORAGE, "[flickr] cannot store username/token\n");
         }
 
         g_free(flickr_user_token);
@@ -248,7 +244,7 @@ static _flickr_api_context_t *_flickr_api_authenticate(dt_storage_flickr_gui_dat
         break;
 
       default:
-        dt_print(DT_DEBUG_PWSTORAGE,"[flickr] user cancelled the login process\n");
+        dt_print(DT_DEBUG_PWSTORAGE, "[flickr] user cancelled the login process\n");
         return NULL;
     }
   }
@@ -259,52 +255,57 @@ static _flickr_api_context_t *_flickr_api_authenticate(dt_storage_flickr_gui_dat
 }
 
 
-static flickcurl_upload_status *_flickr_api_upload_photo( dt_storage_flickr_params_t *p, char *fname, char *caption, char *description, gint imgid )
+static flickcurl_upload_status *_flickr_api_upload_photo(dt_storage_flickr_params_t *p, char *fname,
+                                                         char *caption, char *description, gint imgid)
 {
 
   flickcurl_upload_params *params = g_malloc0(sizeof(flickcurl_upload_params));
   flickcurl_upload_status *status;
 
-  params->safety_level = 1; //Defaults to safe photos
-  params->content_type = 1; //Defaults to photo (we don't support video!)
+  params->safety_level = 1; // Defaults to safe photos
+  params->content_type = 1; // Defaults to photo (we don't support video!)
 
   params->title = caption;
   params->description = description;
 
-  if (imgid)
-    params->tags = dt_tag_get_list(imgid, ",");
-  params->photo_file = fname; //fname should be the URI of temp file
+  if(imgid)
+  {
+    GList *tags_list = dt_tag_get_list(imgid);
+    params->tags = dt_util_glist_to_str(",", tags_list);
+    g_list_free_full(tags_list, g_free);
+  }
+  params->photo_file = fname; // fname should be the URI of temp file
 
-  params->is_public = (int) p->public_perm;
-  params->is_friend = (int) p->friend_perm;
-  params->is_family = (int) p->family_perm;
+  params->is_public = (int)p->public_perm;
+  params->is_friend = (int)p->friend_perm;
+  params->is_family = (int)p->family_perm;
 
   status = flickcurl_photos_upload_params(p->flickr_api->fc, params);
-  if (!status)
+  if(!status)
   {
-    fprintf (stderr,"[flickr] Something went wrong when uploading");
-    g_free (params);
+    fprintf(stderr, "[flickr] Something went wrong when uploading");
+    g_free((gchar *)params->tags);
+    g_free(params);
     return NULL;
   }
+  g_free((gchar *)params->tags);
   g_free(params);
   return status;
 }
 
 
-static char *_flickr_api_create_photoset(_flickr_api_context_t *ctx, const char *photo_id )
+static char *_flickr_api_create_photoset(_flickr_api_context_t *ctx, const char *photo_id)
 {
   char *photoset;
   const char *title = ctx->album_title;
   const char *summary = ctx->album_summary;
 
-  photoset = flickcurl_photosets_create (ctx->fc, title, summary, photo_id, NULL);
-  if (!photoset)
-    fprintf(stderr,"[flickr] Something went wrong when creating gallery %s", title);
+  photoset = flickcurl_photosets_create(ctx->fc, title, summary, photo_id, NULL);
+  if(!photoset) fprintf(stderr, "[flickr] Something went wrong when creating gallery %s", title);
   return photoset;
 }
 
-const char*
-name (const struct dt_imageio_module_storage_t *self)
+const char *name(const struct dt_imageio_module_storage_t *self)
 {
   return _("flickr webalbum");
 }
@@ -312,40 +313,40 @@ name (const struct dt_imageio_module_storage_t *self)
 /** Set status connection text */
 static void set_status(dt_storage_flickr_gui_data_t *ui, gchar *message, gchar *color)
 {
-  if( !color ) color="#ffffff";
-  gchar mup[512]= {0};
-  snprintf(mup, sizeof(mup), "<span foreground=\"%s\" ><small>%s</small></span>",color,message);
-  gtk_label_set_markup(ui->label4, mup);
+  if(!color) color = "#ffffff";
+  gchar mup[512] = { 0 };
+  snprintf(mup, sizeof(mup), "<span foreground=\"%s\" ><small>%s</small></span>", color, message);
+  gtk_label_set_markup(ui->status_label, mup);
 }
 
 static void flickr_entry_changed(GtkEntry *entry, gpointer data)
 {
-  dt_storage_flickr_gui_data_t *ui=(dt_storage_flickr_gui_data_t *)data;
+  dt_storage_flickr_gui_data_t *ui = (dt_storage_flickr_gui_data_t *)data;
 
-  if( ui->flickr_api != NULL)
+  if(ui->flickr_api != NULL)
   {
-    ui->flickr_api->needsReauthentication=TRUE;
+    ui->flickr_api->needsReauthentication = TRUE;
     g_free(ui->user_token);
     ui->user_token = NULL;
-    set_status(ui,_("not authenticated"), "#e07f7f");
-    gtk_widget_set_sensitive(GTK_WIDGET( ui->comboBox1 ) ,FALSE);
+    set_status(ui, _("not authenticated"), "#e07f7f");
+    gtk_widget_set_sensitive(GTK_WIDGET(ui->album_list), FALSE);
   }
 }
 
-static flickcurl_photoset **_flickr_api_photosets( _flickr_api_context_t *ctx, const char *user)
+static flickcurl_photoset **_flickr_api_photosets(_flickr_api_context_t *ctx, const char *user)
 {
   flickcurl_photoset **photoset;
-//  char *nsid;
+  //  char *nsid;
 
-//TODO: Support both userid and email. As more services uses email as username
-//      users can confuse the needed id to be introduced in the user field.
-//  nsid = flickcurl_people_findByEmail(ctx->fc, "@");
+  // TODO: Support both userid and email. As more services uses email as username
+  //      users can confuse the needed id to be introduced in the user field.
+  //  nsid = flickcurl_people_findByEmail(ctx->fc, "@");
 
-//  no need to specify nsid at all
-//  nsid = flickcurl_people_findByUsername(ctx->fc, user);
+  //  no need to specify nsid at all
+  //  nsid = flickcurl_people_findByUsername(ctx->fc, user);
 
-// "If none is specified, the calling user is assumed (or NULL) "
-// (c) http://librdf.org/flickcurl/api/flickcurl-section-photoset.html#flickcurl-photosets-getList
+  // "If none is specified, the calling user is assumed (or NULL) "
+  // (c) http://librdf.org/flickcurl/api/flickcurl-section-photoset.html#flickcurl-photosets-getList
   photoset = flickcurl_photosets_getList(ctx->fc, NULL);
 
   return photoset;
@@ -355,87 +356,73 @@ static flickcurl_photoset **_flickr_api_photosets( _flickr_api_context_t *ctx, c
 static void refresh_albums(dt_storage_flickr_gui_data_t *ui)
 {
   int i;
-  gtk_widget_set_sensitive( GTK_WIDGET(ui->comboBox1), FALSE);
+  gtk_widget_set_sensitive(GTK_WIDGET(ui->album_list), FALSE);
 
-  if (ui->flickr_api == NULL || ui->flickr_api->needsReauthentication == TRUE)
+  if(ui->flickr_api == NULL || ui->flickr_api->needsReauthentication == TRUE)
   {
-    if (ui->flickr_api != NULL) _flickr_api_free (ui->flickr_api);
+    if(ui->flickr_api != NULL) _flickr_api_free(ui->flickr_api);
     ui->flickr_api = _flickr_api_authenticate(ui);
-    if (ui->flickr_api != NULL)
+    if(ui->flickr_api != NULL)
     {
-      set_status(ui,_("authenticated"), "#7fe07f");
+      set_status(ui, _("authenticated"), "#7fe07f");
     }
     else
     {
-      set_status(ui,_("not authenticated"), "#e07f7f");
-      gtk_widget_set_sensitive(GTK_WIDGET( ui->comboBox1 ) ,FALSE);
+      set_status(ui, _("not authenticated"), "#e07f7f");
+      gtk_widget_set_sensitive(GTK_WIDGET(ui->album_list), FALSE);
       return;
     }
   }
 
-  // First clear the model of data except first item (Create new album)
-  GtkTreeModel *model=gtk_combo_box_get_model(GTK_COMBO_BOX(ui->comboBox1));
-  gtk_list_store_clear (GTK_LIST_STORE(model));
+  // First clear the cobobox except first 2 items (none / create new album)
+  dt_bauhaus_combobox_clear(ui->album_list);
 
-  ui->albums = _flickr_api_photosets(ui->flickr_api, gtk_entry_get_text(ui->entry1));
-  if( ui->albums )
+  ui->albums = _flickr_api_photosets(ui->flickr_api, gtk_entry_get_text(ui->user_entry));
+  if(ui->albums)
   {
 
     // Add standard action
-    gtk_combo_box_text_append_text(ui->comboBox1, _("without album") );
-    gtk_combo_box_text_append_text(ui->comboBox1, _("create new album") );
-    gtk_combo_box_text_append_text(ui->comboBox1, "" );// Separator
+    dt_bauhaus_combobox_add(ui->album_list, _("without album"));
+    dt_bauhaus_combobox_add(ui->album_list, _("create new album"));
+//     dt_bauhaus_combobox_add(ui->album_list, ""); // Separator // FIXME: bauhaus doesn't support separators
 
     // Then add albums from list...
-    for(i=0; ui->albums[i]; i++)
+    for(i = 0; ui->albums[i]; i++)
     {
-      char data[512]= {0};
+      char data[512] = { 0 };
       snprintf(data, sizeof(data), "%s (%i)", ui->albums[i]->title, ui->albums[i]->photos_count);
-      gtk_combo_box_text_append_text(ui->comboBox1, g_strdup(data));
+      dt_bauhaus_combobox_add(ui->album_list, data);
     }
-    gtk_combo_box_set_active(GTK_COMBO_BOX(ui->comboBox1), 3);
-    gtk_widget_hide( GTK_WIDGET(ui->hbox1) ); // Hide create album box...
+    dt_bauhaus_combobox_set(ui->album_list, 2);
+    gtk_widget_hide(GTK_WIDGET(ui->create_box)); // Hide create album box...
   }
   else
   {
     // Failed to parse feed of album...
     // Lets notify somehow...
-    gtk_combo_box_set_active(GTK_COMBO_BOX(ui->comboBox1), 0);
+    dt_bauhaus_combobox_set(ui->album_list, 0);
   }
-  gtk_widget_set_sensitive( GTK_WIDGET(ui->comboBox1), TRUE);
-
+  gtk_widget_set_sensitive(GTK_WIDGET(ui->album_list), TRUE);
 }
 
 
-static void flickr_album_changed(GtkComboBox *cb,gpointer data)
+static void flickr_album_changed(GtkComboBox *cb, gpointer data)
 {
-  dt_storage_flickr_gui_data_t * ui=(dt_storage_flickr_gui_data_t *)data;
-  gchar *value=gtk_combo_box_text_get_active_text(ui->comboBox1);
-  if( value!=NULL && strcmp( value, _("create new album") ) == 0 )
+  dt_storage_flickr_gui_data_t *ui = (dt_storage_flickr_gui_data_t *)data;
+  const gchar *value = dt_bauhaus_combobox_get_text(ui->album_list);
+  if(value != NULL && strcmp(value, _("create new album")) == 0)
   {
-    gtk_widget_set_no_show_all(GTK_WIDGET(ui->hbox1), FALSE);
-    gtk_widget_show_all(GTK_WIDGET(ui->hbox1));
+    gtk_widget_set_no_show_all(GTK_WIDGET(ui->create_box), FALSE);
+    gtk_widget_show_all(GTK_WIDGET(ui->create_box));
   }
   else
-    gtk_widget_hide(GTK_WIDGET(ui->hbox1));
-}
-
-static gboolean combobox_separator(GtkTreeModel *model,GtkTreeIter *iter,gpointer data)
-{
-  GValue value = { 0, };
-  gtk_tree_model_get_value(model,iter,0,&value);
-  gchar *v=NULL;
-  if (G_VALUE_HOLDS_STRING (&value))
-  {
-    if( (v=(gchar *)g_value_get_string (&value))!=NULL && *v == '\0' ) return TRUE;
-  }
-  return FALSE;
+    gtk_widget_hide(GTK_WIDGET(ui->create_box));
 }
 
 // Refresh button pressed...
-static void flickr_button1_clicked(GtkButton *button,gpointer data)
+static void flickr_button1_clicked(GtkButton *button, gpointer data)
 {
-  dt_storage_flickr_gui_data_t * ui=(dt_storage_flickr_gui_data_t *)data;
+  dt_storage_flickr_gui_data_t *ui = (dt_storage_flickr_gui_data_t *)data;
   refresh_albums(ui);
 }
 
@@ -455,131 +442,125 @@ focus_out(GtkWidget *widget, GdkEventFocus *event, gpointer user_data)
 }
 */
 
-void
-gui_init (dt_imageio_module_storage_t *self)
+void gui_init(dt_imageio_module_storage_t *self)
 {
   self->gui_data = (dt_storage_flickr_gui_data_t *)g_malloc0(sizeof(dt_storage_flickr_gui_data_t));
-  dt_storage_flickr_gui_data_t *ui= self->gui_data;
-  self->widget = gtk_vbox_new(FALSE, 0);
+  dt_storage_flickr_gui_data_t *ui = self->gui_data;
+  self->widget = gtk_grid_new();
+  gtk_grid_set_row_spacing(GTK_GRID(self->widget), DT_PIXEL_APPLY_DPI(5));
+  gtk_grid_set_column_spacing(GTK_GRID(self->widget), DT_PIXEL_APPLY_DPI(10));
+  int line = 0;
 
-  GtkWidget *hbox1=gtk_hbox_new(FALSE,5);
-  GtkWidget *hbox0=gtk_hbox_new(FALSE,5);
-  GtkWidget *vbox1=gtk_vbox_new(FALSE,0);
-  GtkWidget *vbox2=gtk_vbox_new(FALSE,5);
-
-  ui->label1 = GTK_LABEL(  gtk_label_new( _("flickr user") ) );
-  ui->label3 = GTK_LABEL(  gtk_label_new( _("photosets") ) );
-  ui->labelPerms = GTK_LABEL(  gtk_label_new( _("visible to") ) );
-  ui->label4 = GTK_LABEL(  gtk_label_new( NULL ) );
-
-  set_status(ui,_("click login button to start"), "#ffffff");
-
-  ui->label5 = GTK_LABEL(  gtk_label_new( _("title") ) );
-  ui->label6 = GTK_LABEL(  gtk_label_new( _("summary") ) );
-  gtk_misc_set_alignment(GTK_MISC(ui->label1),      0.0, 0.5);
-  gtk_misc_set_alignment(GTK_MISC(ui->labelPerms),  0.0, 0.9);
-  gtk_misc_set_alignment(GTK_MISC(ui->label3),      0.0, 0.7);
-  gtk_misc_set_alignment(GTK_MISC(ui->label5),      0.0, 0.5);
-  gtk_misc_set_alignment(GTK_MISC(ui->label6),      0.0, 0.5);
-
-  ui->entry1 = GTK_ENTRY( gtk_entry_new() );
-  ui->entry3 = GTK_ENTRY( gtk_entry_new() );  // Album title
-  ui->entry4 = GTK_ENTRY( gtk_entry_new() );  // Album summary
-
-  dt_gui_key_accel_block_on_focus_connect (GTK_WIDGET (ui->entry1));
-  dt_gui_key_accel_block_on_focus_connect (GTK_WIDGET (ui->entry3));
-  dt_gui_key_accel_block_on_focus_connect (GTK_WIDGET (ui->entry4));
-
-  /*
-    gtk_widget_add_events(GTK_WIDGET(ui->entry1), GDK_FOCUS_CHANGE_MASK);
-    g_signal_connect (G_OBJECT (ui->entry1), "focus-in-event",  G_CALLBACK(focus_in),  NULL);
-    g_signal_connect (G_OBJECT (ui->entry1), "focus-out-event", G_CALLBACK(focus_out), NULL);
-
-    gtk_widget_add_events(GTK_WIDGET(ui->entry2), GDK_FOCUS_CHANGE_MASK);
-    g_signal_connect (G_OBJECT (ui->entry2), "focus-in-event",  G_CALLBACK(focus_in),  NULL);
-    g_signal_connect (G_OBJECT (ui->entry2), "focus-out-event", G_CALLBACK(focus_out), NULL);
-    gtk_widget_add_events(GTK_WIDGET(ui->entry3), GDK_FOCUS_CHANGE_MASK);
-    g_signal_connect (G_OBJECT (ui->entry3), "focus-in-event",  G_CALLBACK(focus_in),  NULL);
-    g_signal_connect (G_OBJECT (ui->entry3), "focus-out-event", G_CALLBACK(focus_out), NULL);
-    gtk_widget_add_events(GTK_WIDGET(ui->entry4), GDK_FOCUS_CHANGE_MASK);
-    g_signal_connect (G_OBJECT (ui->entry4), "focus-in-event",  G_CALLBACK(focus_in),  NULL);
-    g_signal_connect (G_OBJECT (ui->entry4), "focus-out-event", G_CALLBACK(focus_out), NULL);
-  */
-  GHashTable* table = dt_pwstorage_get("flickr");
-  gchar* _username = g_strdup( g_hash_table_lookup(table, "username"));
+  GHashTable *table = dt_pwstorage_get("flickr");
+  gchar *_username = g_strdup(g_hash_table_lookup(table, "username"));
   g_hash_table_destroy(table);
-  gtk_entry_set_text( ui->entry1,  _username == NULL?"":_username );
-  gtk_entry_set_text( ui->entry3, _("my new photoset") );
-  gtk_entry_set_text( ui->entry4, _("exported from darktable") );
 
-  GtkWidget *albumlist=gtk_hbox_new(FALSE,0);
-  ui->comboBox1 = GTK_COMBO_BOX_TEXT(gtk_combo_box_text_new()); // Available albums
-
-  dt_ellipsize_combo(GTK_COMBO_BOX(ui->comboBox1));
-
-  ui->dtbutton1 = DTGTK_BUTTON( dtgtk_button_new(dtgtk_cairo_paint_refresh,0) );
-  g_object_set(G_OBJECT(ui->dtbutton1), "tooltip-text", _("refresh album list"), (char *)NULL);
-
-  ui->button = GTK_BUTTON(gtk_button_new_with_label(_("login")));
-  g_object_set(G_OBJECT(ui->button), "tooltip-text", _("flickr login"), (char *)NULL);
-
-  gtk_widget_set_sensitive( GTK_WIDGET(ui->comboBox1), FALSE);
-  gtk_combo_box_set_row_separator_func(GTK_COMBO_BOX(ui->comboBox1), combobox_separator,ui->comboBox1,NULL);
-  gtk_box_pack_start(GTK_BOX(albumlist), GTK_WIDGET(ui->comboBox1), TRUE, TRUE, 0);
-  gtk_box_pack_start(GTK_BOX(albumlist), GTK_WIDGET(ui->dtbutton1), FALSE, FALSE, 0);
-
-  ui->checkButton2 = GTK_CHECK_BUTTON( gtk_check_button_new_with_label(_("export tags")) );
-  gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON( ui->checkButton2 ),TRUE);
-
-  ui->permsComboBox = GTK_COMBO_BOX_TEXT(gtk_combo_box_text_new());
-  gtk_combo_box_text_append_text(ui->permsComboBox, _("you"));
-  gtk_combo_box_text_append_text(ui->permsComboBox, _("friends"));
-  gtk_combo_box_text_append_text(ui->permsComboBox, _("family"));
-  gtk_combo_box_text_append_text(ui->permsComboBox, _("friends + family"));
-  gtk_combo_box_text_append_text(ui->permsComboBox, _("everyone"));
-  gtk_combo_box_set_active(GTK_COMBO_BOX(ui->permsComboBox), 0); // Set default permission to private
-
-  gtk_box_pack_start(GTK_BOX(self->widget), hbox0, TRUE, FALSE, 5);
-  gtk_box_pack_start(GTK_BOX(self->widget), hbox1, TRUE, FALSE, 0);
-  gtk_box_pack_start(GTK_BOX( hbox0 ), GTK_WIDGET( ui->label1 ), TRUE, TRUE, 0);
-  gtk_box_pack_start(GTK_BOX( hbox0 ), GTK_WIDGET( ui->entry1 ), TRUE, FALSE, 0);
-  gtk_box_pack_start(GTK_BOX( hbox0 ), GTK_WIDGET( ui->button ), FALSE, FALSE, 0);
-  gtk_box_pack_start(GTK_BOX( hbox1 ), vbox1, FALSE, FALSE, 0);
-  gtk_box_pack_start(GTK_BOX( hbox1 ), vbox2, TRUE, TRUE, 0);
-  gtk_box_pack_start(GTK_BOX( vbox1 ), GTK_WIDGET( gtk_label_new("")), TRUE, TRUE, 0);
-  gtk_box_pack_start(GTK_BOX( vbox1 ), GTK_WIDGET( ui->labelPerms ), TRUE, TRUE, 0);
-  gtk_box_pack_start(GTK_BOX( vbox1 ), GTK_WIDGET( ui->label3 ), TRUE, TRUE, 0);
-  gtk_box_pack_start(GTK_BOX( vbox2 ), GTK_WIDGET( ui->label4 ), TRUE, FALSE, 0);
-  gtk_box_pack_start(GTK_BOX( vbox2 ), GTK_WIDGET( ui->checkButton2 ), TRUE, FALSE, 0);
-  gtk_box_pack_start(GTK_BOX( vbox2 ), GTK_WIDGET( ui->permsComboBox ), TRUE, FALSE, 0);
-  gtk_box_pack_start(GTK_BOX( vbox2 ), GTK_WIDGET( albumlist ), TRUE, FALSE, 0);
+  GtkWidget *hbox, *label, *button;
 
 
-  // Create Album
-  ui->hbox1=GTK_BOX(gtk_hbox_new(FALSE,5));
-  gtk_widget_set_no_show_all(GTK_WIDGET(ui->hbox1), TRUE);
-  vbox1=gtk_vbox_new(FALSE,0);
-  vbox2=gtk_vbox_new(FALSE,0);
+  label = gtk_label_new(_("flickr user"));
+  g_object_set(G_OBJECT(label), "xalign", 0.0, NULL);
+  gtk_grid_attach(GTK_GRID(self->widget), label, 0, line++, 1, 1);
 
-  gtk_box_pack_start(GTK_BOX(ui->hbox1), vbox1, FALSE, FALSE, 0);
-  gtk_box_pack_start(GTK_BOX(ui->hbox1), vbox2, TRUE, TRUE, 0);
-  gtk_box_pack_start(GTK_BOX(self->widget), GTK_WIDGET(ui->hbox1), TRUE, FALSE, 5);
-  gtk_box_pack_start(GTK_BOX( vbox1 ), GTK_WIDGET( ui->label5 ), TRUE, TRUE, 0);
-  gtk_box_pack_start(GTK_BOX( vbox1 ), GTK_WIDGET( ui->label6 ), TRUE, TRUE, 0);
+  hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, DT_PIXEL_APPLY_DPI(8));
 
-  gtk_box_pack_start(GTK_BOX( vbox2 ), GTK_WIDGET( ui->entry3 ), TRUE, FALSE, 0);
-  gtk_box_pack_start(GTK_BOX( vbox2 ), GTK_WIDGET( ui->entry4 ), TRUE, FALSE, 0);
+  ui->user_entry = GTK_ENTRY(gtk_entry_new());
+  gtk_widget_set_hexpand(GTK_WIDGET(ui->user_entry), TRUE);
+  dt_gui_key_accel_block_on_focus_connect(GTK_WIDGET(ui->user_entry));
+  gtk_entry_set_text(ui->user_entry, _username == NULL ? "" : _username);
+  g_signal_connect(G_OBJECT(ui->user_entry), "changed", G_CALLBACK(flickr_entry_changed), (gpointer)ui);
+  gtk_entry_set_width_chars(GTK_ENTRY(ui->user_entry), 0);
 
-  // Setup signals
-  // add signal on realize and hide gtk_widget_hide(GTK_WIDGET(ui->hbox1));
+  button = gtk_button_new_with_label(_("login"));
+  g_object_set(G_OBJECT(button), "tooltip-text", _("flickr login"), (char *)NULL);
+  g_signal_connect(G_OBJECT(button), "clicked", G_CALLBACK(flickr_button1_clicked), (gpointer)ui);
+  gtk_box_pack_start(GTK_BOX(hbox), GTK_WIDGET(ui->user_entry), TRUE, TRUE, 0);
+  gtk_box_pack_start(GTK_BOX(hbox), button, FALSE, FALSE, 0);
 
-  g_signal_connect(G_OBJECT(ui->dtbutton1), "clicked", G_CALLBACK(flickr_button1_clicked), (gpointer)ui);
-  g_signal_connect(G_OBJECT(ui->button), "clicked", G_CALLBACK(flickr_button1_clicked), (gpointer)ui);
-  g_signal_connect(G_OBJECT(ui->entry1), "changed", G_CALLBACK(flickr_entry_changed), (gpointer)ui);
-  g_signal_connect(G_OBJECT(ui->comboBox1), "changed", G_CALLBACK(flickr_album_changed), (gpointer)ui);
+  gtk_grid_attach_next_to(GTK_GRID(self->widget), hbox, label, GTK_POS_RIGHT, 1, 1);
+
+
+  ui->status_label = GTK_LABEL(gtk_label_new(NULL));
+  gtk_widget_set_halign(GTK_WIDGET(ui->status_label), GTK_ALIGN_START);
+  gtk_grid_attach(GTK_GRID(self->widget), GTK_WIDGET(ui->status_label), 1, line++, 1, 1);
+
+
+  ui->export_tags = dt_bauhaus_combobox_new(NULL);
+  dt_bauhaus_widget_set_label(ui->export_tags, NULL, _("export tags"));
+  dt_bauhaus_combobox_add(ui->export_tags, _("yes"));
+  dt_bauhaus_combobox_add(ui->export_tags, _("no"));
+  dt_bauhaus_combobox_set(ui->export_tags, 0);
+  gtk_widget_set_hexpand(ui->export_tags, TRUE);
+  gtk_grid_attach(GTK_GRID(self->widget), ui->export_tags, 0, line++, 2, 1);
+
+
+  ui->permission_list = dt_bauhaus_combobox_new(NULL);
+  dt_bauhaus_widget_set_label(ui->permission_list, NULL, _("visible to"));
+  dt_bauhaus_combobox_add(ui->permission_list, _("you"));
+  dt_bauhaus_combobox_add(ui->permission_list, _("friends"));
+  dt_bauhaus_combobox_add(ui->permission_list, _("family"));
+  dt_bauhaus_combobox_add(ui->permission_list, _("friends + family"));
+  dt_bauhaus_combobox_add(ui->permission_list, _("everyone"));
+  dt_bauhaus_combobox_set(ui->permission_list, 0); // Set default permission to private
+  gtk_grid_attach(GTK_GRID(self->widget), GTK_WIDGET(ui->permission_list), 0, line++, 2, 1);
+
+
+  hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, DT_PIXEL_APPLY_DPI(5));
+
+  ui->album_list = dt_bauhaus_combobox_new(NULL); // Available albums
+  dt_bauhaus_widget_set_label(ui->album_list, NULL, _("photosets"));
+  g_signal_connect(G_OBJECT(ui->album_list), "value-changed", G_CALLBACK(flickr_album_changed), (gpointer)ui);
+  gtk_widget_set_sensitive(ui->album_list, FALSE);
+  gtk_box_pack_start(GTK_BOX(hbox), ui->album_list, TRUE, TRUE, 0);
+
+  button = dtgtk_button_new(dtgtk_cairo_paint_refresh, CPF_DO_NOT_USE_BORDER);
+  g_object_set(G_OBJECT(button), "tooltip-text", _("refresh album list"), (char *)NULL);
+  g_signal_connect(G_OBJECT(button), "clicked", G_CALLBACK(flickr_button1_clicked), (gpointer)ui);
+  gtk_box_pack_start(GTK_BOX(hbox), button, FALSE, FALSE, 0);
+
+  gtk_grid_attach(GTK_GRID(self->widget), hbox, 0, line++, 2, 1);
+
+
+  // the box that gets shown when a new album is to be created
+  ui->create_box = GTK_BOX(gtk_box_new(GTK_ORIENTATION_VERTICAL, DT_PIXEL_APPLY_DPI(5)));
+  gtk_widget_set_no_show_all(GTK_WIDGET(ui->create_box), TRUE);
+  gtk_grid_attach(GTK_GRID(self->widget), GTK_WIDGET(ui->create_box), 0, line++, 2, 1);
+
+
+  hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, DT_PIXEL_APPLY_DPI(10));
+
+  label = gtk_label_new(_("title"));
+  g_object_set(G_OBJECT(label), "xalign", 0.0, NULL);
+  gtk_box_pack_start(GTK_BOX(hbox), label, FALSE, FALSE, 0);
+
+  ui->title_entry = GTK_ENTRY(gtk_entry_new()); // Album title
+  dt_gui_key_accel_block_on_focus_connect(GTK_WIDGET(ui->title_entry));
+  gtk_entry_set_text(ui->title_entry, _("my new photoset"));
+  gtk_box_pack_start(GTK_BOX(hbox), GTK_WIDGET(ui->title_entry), TRUE, TRUE, 0);
+  gtk_entry_set_width_chars(GTK_ENTRY(ui->title_entry), 0);
+
+  gtk_box_pack_start(ui->create_box, hbox, FALSE, FALSE, 0);
+
+
+  hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, DT_PIXEL_APPLY_DPI(10));
+
+  label = gtk_label_new(_("summary"));
+  g_object_set(G_OBJECT(label), "xalign", 0.0, NULL);
+  gtk_box_pack_start(GTK_BOX(hbox), label, FALSE, FALSE, 0);
+
+  ui->summary_entry = GTK_ENTRY(gtk_entry_new()); // Album summary
+  dt_gui_key_accel_block_on_focus_connect(GTK_WIDGET(ui->summary_entry));
+  gtk_entry_set_text(ui->summary_entry, _("exported from darktable"));
+  gtk_box_pack_start(GTK_BOX(hbox), GTK_WIDGET(ui->summary_entry), TRUE, TRUE, 0);
+  gtk_entry_set_width_chars(GTK_ENTRY(ui->summary_entry), 0);
+
+  gtk_box_pack_start(ui->create_box, hbox, TRUE, TRUE, 0);
+
+
+  set_status(ui, _("click login button to start"), "#ffffff");
 
   /**
-  dont' populate the combo on startup, save 3 second
+  don't populate the combo on startup, save 3 second
 
   // If username and password is stored, let's populate the combo
   if( _username && _password )
@@ -589,58 +570,55 @@ gui_init (dt_imageio_module_storage_t *self)
   }
   */
 
-  if( _username )
-    g_free (_username);
-  gtk_combo_box_set_active(GTK_COMBO_BOX(ui->comboBox1), 0);
+  g_free(_username);
+  dt_bauhaus_combobox_set(ui->album_list, 0);
 }
 
-void
-gui_cleanup (dt_imageio_module_storage_t *self)
+void gui_cleanup(dt_imageio_module_storage_t *self)
 {
   dt_storage_flickr_gui_data_t *ui = self->gui_data;
-  dt_gui_key_accel_block_on_focus_disconnect (GTK_WIDGET (ui->entry1));
-  dt_gui_key_accel_block_on_focus_disconnect (GTK_WIDGET (ui->entry3));
-  dt_gui_key_accel_block_on_focus_disconnect (GTK_WIDGET (ui->entry4));
+  dt_gui_key_accel_block_on_focus_disconnect(GTK_WIDGET(ui->user_entry));
+  dt_gui_key_accel_block_on_focus_disconnect(GTK_WIDGET(ui->title_entry));
+  dt_gui_key_accel_block_on_focus_disconnect(GTK_WIDGET(ui->summary_entry));
   g_free(self->gui_data);
 }
 
-void
-gui_reset (dt_imageio_module_storage_t *self)
+void gui_reset(dt_imageio_module_storage_t *self)
 {
 }
 
-int
-store (dt_imageio_module_storage_t *self, dt_imageio_module_data_t *sdata, const int imgid, dt_imageio_module_format_t *format, dt_imageio_module_data_t *fdata,
-       const int num, const int total, const gboolean high_quality)
+int store(dt_imageio_module_storage_t *self, dt_imageio_module_data_t *sdata, const int imgid,
+          dt_imageio_module_format_t *format, dt_imageio_module_data_t *fdata, const int num, const int total,
+          const gboolean high_quality)
 {
   gint result = 0;
-  dt_storage_flickr_params_t *p=(dt_storage_flickr_params_t *)sdata;
+  dt_storage_flickr_params_t *p = (dt_storage_flickr_params_t *)sdata;
   flickcurl_upload_status *photo_status;
-  gint tags=0;
+  gint tags = 0;
 
   const char *ext = format->extension(fdata);
 
   // Let's upload image...
 
   /* construct a temporary file name */
-  char fname[PATH_MAX]= {0};
-  dt_loc_get_tmp_dir (fname, sizeof(fname));
-  g_strlcat (fname,"/darktable.XXXXXX.", sizeof(fname));
+  char fname[PATH_MAX] = { 0 };
+  dt_loc_get_tmp_dir(fname, sizeof(fname));
+  g_strlcat(fname, "/darktable.XXXXXX.", sizeof(fname));
   g_strlcat(fname, ext, sizeof(fname));
 
   char *caption = NULL;
   char *description = NULL;
 
 
-  gint fd=g_mkstemp(fname);
-  fprintf(stderr,"tempfile: %s\n",fname);
-  if(fd==-1)
+  gint fd = g_mkstemp(fname);
+  fprintf(stderr, "tempfile: %s\n", fname);
+  if(fd == -1)
   {
     dt_control_log("failed to create temporary image for flickr export");
     return 1;
   }
   close(fd);
-  const dt_image_t *img = dt_image_cache_read_get(darktable.image_cache, imgid);
+  const dt_image_t *img = dt_image_cache_get(darktable.image_cache, imgid, 'r');
 
   // If title is not existing, then use the filename without extension. If not, then use title instead
   GList *title = dt_metadata_get(img->id, "Xmp.dc.title", NULL);
@@ -652,7 +630,7 @@ store (dt_imageio_module_storage_t *self, dt_imageio_module_data_t *sdata, const
   else
   {
     caption = g_path_get_basename(img->filename);
-    (g_strrstr(caption,"."))[0]='\0'; // chop extension...
+    (g_strrstr(caption, "."))[0] = '\0'; // chop extension...
   }
 
   GList *desc = dt_metadata_get(img->id, "Xmp.dc.description", NULL);
@@ -662,7 +640,7 @@ store (dt_imageio_module_storage_t *self, dt_imageio_module_data_t *sdata, const
   }
   dt_image_cache_read_release(darktable.image_cache, img);
 
-  if(dt_imageio_export(imgid, fname, format, fdata, high_quality,FALSE,self,sdata) != 0)
+  if(dt_imageio_export(imgid, fname, format, fdata, high_quality, FALSE, self, sdata, num, total) != 0)
   {
     fprintf(stderr, "[imageio_storage_flickr] could not export to file: `%s'!\n", fname);
     dt_control_log(_("could not export to file `%s'!"), fname);
@@ -671,19 +649,18 @@ store (dt_imageio_module_storage_t *self, dt_imageio_module_data_t *sdata, const
   }
 
 #ifdef _OPENMP
-  #pragma omp critical
+#pragma omp critical
 #endif
   {
-    //TODO: Check if this could be done in threads, so we enhance export time by using
+    // TODO: Check if this could be done in threads, so we enhance export time by using
     //      upload time for one image to export another image to disk.
     // Upload image
     // Do we export tags?
-    if( p->export_tags == TRUE )
-      tags = imgid;
-    photo_status = _flickr_api_upload_photo( p, fname, caption, description, tags );
+    if(p->export_tags == TRUE) tags = imgid;
+    photo_status = _flickr_api_upload_photo(p, fname, caption, description, tags);
   }
 
-  if( !photo_status )
+  if(!photo_status)
   {
     fprintf(stderr, "[imageio_storage_flickr] could not upload to flickr!\n");
     dt_control_log(_("could not upload to flickr!"));
@@ -691,37 +668,37 @@ store (dt_imageio_module_storage_t *self, dt_imageio_module_data_t *sdata, const
     goto cleanup;
   }
 
-//  int fail = 0;
+  //  int fail = 0;
   // A photoset is only created if we have an album title set
-  if( p->flickr_api->current_album == NULL && p->flickr_api->new_album == TRUE)
+  if(p->flickr_api->current_album == NULL && p->flickr_api->new_album == TRUE)
   {
     char *photoset_id;
     photoset_id = _flickr_api_create_photoset(p->flickr_api, photo_status->photoid);
 
-    if( photoset_id == NULL)
+    if(photoset_id == NULL)
     {
       dt_control_log("failed to create flickr album");
-//      fail = 1;
+      //      fail = 1;
     }
     else
     {
-//      p->flickr_api->new_album = FALSE;
-      p->flickr_api->current_album = flickcurl_photosets_getInfo(p->flickr_api->fc,photoset_id);
+      //      p->flickr_api->new_album = FALSE;
+      p->flickr_api->current_album = flickcurl_photosets_getInfo(p->flickr_api->fc, photoset_id);
     }
   }
 
-//  if(fail) return 1;
-// TODO: What to do if photoset creation fails?
+  //  if(fail) return 1;
+  // TODO: What to do if photoset creation fails?
 
   // Add to gallery, if needed
-  if (p->flickr_api->current_album != NULL && p->flickr_api->new_album != TRUE)
+  if(p->flickr_api->current_album != NULL && p->flickr_api->new_album != TRUE)
   {
-    flickcurl_photosets_addPhoto (p->flickr_api->fc, p->flickr_api->current_album->id, photo_status->photoid);
+    flickcurl_photosets_addPhoto(p->flickr_api->fc, p->flickr_api->current_album->id, photo_status->photoid);
     // TODO: Check for errors adding photo to gallery
   }
   else
   {
-    if (p->flickr_api->current_album != NULL && p->flickr_api->new_album == TRUE)
+    if(p->flickr_api->current_album != NULL && p->flickr_api->new_album == TRUE)
     {
       p->flickr_api->new_album = FALSE;
     }
@@ -730,21 +707,19 @@ store (dt_imageio_module_storage_t *self, dt_imageio_module_data_t *sdata, const
 cleanup:
 
   // And remove from filesystem..
-  unlink( fname );
-  g_free( caption );
-  if(desc)
-    g_list_free_full(desc, &g_free);
+  unlink(fname);
+  g_free(caption);
+  if(desc) g_list_free_full(desc, &g_free);
 
-  if (!result)
+  if(!result)
   {
-    //this makes sense only if the export was successful
-    dt_control_log(_("%d/%d exported to flickr webalbum"), num, total );
+    // this makes sense only if the export was successful
+    dt_control_log(_("%d/%d exported to flickr webalbum"), num, total);
   }
   return result;
 }
 
-size_t
-params_size(dt_imageio_module_storage_t *self)
+size_t params_size(dt_imageio_module_storage_t *self)
 {
   return sizeof(int64_t);
 }
@@ -752,24 +727,25 @@ params_size(dt_imageio_module_storage_t *self)
 void init(dt_imageio_module_storage_t *self)
 {
 }
-void*
-get_params(dt_imageio_module_storage_t *self)
+
+void *get_params(dt_imageio_module_storage_t *self)
 {
   // have to return the size of the struct to store (i.e. without all the variable pointers at the end)
-  // TODO: if a hash to encrypted data is stored here, return only this size and store it at the beginning of the struct!
-  dt_storage_flickr_gui_data_t *ui =(dt_storage_flickr_gui_data_t *)self->gui_data;
+  // TODO: if a hash to encrypted data is stored here, return only this size and store it at the beginning of
+  // the struct!
+  dt_storage_flickr_gui_data_t *ui = (dt_storage_flickr_gui_data_t *)self->gui_data;
   dt_storage_flickr_params_t *d = (dt_storage_flickr_params_t *)g_malloc0(sizeof(dt_storage_flickr_params_t));
   if(!d) return NULL;
   if(!ui) return NULL; // gui not initialized, CLI mode
   d->hash = 1;
 
   // fill d from controls in ui
-  if( ui->flickr_api && ui->flickr_api->needsReauthentication == FALSE)
+  if(ui->flickr_api && ui->flickr_api->needsReauthentication == FALSE)
   {
     // We are authenticated and off to actually export images..
     d->flickr_api = ui->flickr_api;
-    int index = gtk_combo_box_get_active(GTK_COMBO_BOX(ui->comboBox1));
-    if( index >= 0 )
+    int index = dt_bauhaus_combobox_get(ui->album_list);
+    if(index >= 0)
     {
       switch(index)
       {
@@ -778,23 +754,23 @@ get_params(dt_imageio_module_storage_t *self)
           break;
         case 1: // Create new album
           d->flickr_api->current_album = NULL;
-          d->flickr_api->album_title = g_strdup( gtk_entry_get_text( ui->entry3 ) );
-          d->flickr_api->album_summary = g_strdup( gtk_entry_get_text( ui->entry4) );
+          d->flickr_api->album_title = g_strdup(gtk_entry_get_text(ui->title_entry));
+          d->flickr_api->album_summary = g_strdup(gtk_entry_get_text(ui->summary_entry));
           d->flickr_api->new_album = TRUE;
           break;
         default:
           // use existing album
-          d->flickr_api->current_album = flickcurl_photosets_getInfo(d->flickr_api->fc,ui->albums[index-3]->id);
-          if( d->flickr_api->current_album == NULL )
+          d->flickr_api->current_album
+              = flickcurl_photosets_getInfo(d->flickr_api->fc, ui->albums[index - 2]->id);
+          if(d->flickr_api->current_album == NULL)
           {
             // Something went wrong...
-            fprintf(stderr,"Something went wrong.. album index %d = NULL\n",index-3 );
+            fprintf(stderr, "Something went wrong.. album index %d = NULL\n", index - 2);
             g_free(d);
             return NULL;
           }
           break;
       }
-
     }
     else
     {
@@ -802,10 +778,10 @@ get_params(dt_imageio_module_storage_t *self)
       return NULL;
     }
 
-    d->export_tags = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(ui->checkButton2));
+    d->export_tags = (dt_bauhaus_combobox_get(ui->export_tags) == 0);
 
     /* Handle the permissions */
-    int perm_index = (int) gtk_combo_box_get_active(GTK_COMBO_BOX(ui->permsComboBox));
+    int perm_index = (int)dt_bauhaus_combobox_get(ui->permission_list);
     switch(perm_index)
     {
       case 0: // Private
@@ -828,7 +804,7 @@ get_params(dt_imageio_module_storage_t *self)
         d->friend_perm = 1;
         d->family_perm = 1;
         break;
-      case 4: //Public
+      case 4: // Public
         d->public_perm = 1;
         d->friend_perm = 0;
         d->family_perm = 0;
@@ -837,28 +813,27 @@ get_params(dt_imageio_module_storage_t *self)
 
     // Let UI forget about this api context and recreate a new one for further usage...
     ui->flickr_api = _flickr_api_authenticate(ui);
-    if (ui->flickr_api)
+    if(ui->flickr_api)
     {
-      set_status(ui,_("authenticated"), "#7fe07f");
+      set_status(ui, _("authenticated"), "#7fe07f");
     }
     else
     {
-      set_status(ui,_("not authenticated"), "#e07f7f");
-      gtk_widget_set_sensitive(GTK_WIDGET( ui->comboBox1 ) ,FALSE);
+      set_status(ui, _("not authenticated"), "#e07f7f");
+      gtk_widget_set_sensitive(GTK_WIDGET(ui->album_list), FALSE);
     }
   }
   else
   {
-    set_status(ui,_("not authenticated"), "#e07f7f");
-    gtk_widget_set_sensitive(GTK_WIDGET( ui->comboBox1 ) ,FALSE);
+    set_status(ui, _("not authenticated"), "#e07f7f");
+    gtk_widget_set_sensitive(GTK_WIDGET(ui->album_list), FALSE);
     g_free(d);
     return NULL;
   }
   return d;
 }
 
-int
-set_params(dt_imageio_module_storage_t *self, const void *params, const int size)
+int set_params(dt_imageio_module_storage_t *self, const void *params, const int size)
 {
   if(size != self->params_size(self)) return 1;
   // gui stuff not updated, as sensitive user data is not stored in the preset.
@@ -868,18 +843,19 @@ set_params(dt_imageio_module_storage_t *self, const void *params, const int size
 
 int supported(dt_imageio_module_storage_t *storage, dt_imageio_module_format_t *format)
 {
-  if( strcmp(format->mime(NULL) ,"image/jpeg") ==  0 ) return 1;
-  else if( strcmp(format->mime(NULL) ,"image/png") ==  0 ) return 1;
+  if(strcmp(format->mime(NULL), "image/jpeg") == 0)
+    return 1;
+  else if(strcmp(format->mime(NULL), "image/png") == 0)
+    return 1;
 
   return 0;
 }
 
-void
-free_params(dt_imageio_module_storage_t *self, dt_imageio_module_data_t *params)
+void free_params(dt_imageio_module_storage_t *self, dt_imageio_module_data_t *params)
 {
   dt_storage_flickr_params_t *d = (dt_storage_flickr_params_t *)params;
 
-  _flickr_api_free(  d->flickr_api ); //TODO
+  _flickr_api_free(d->flickr_api); // TODO
 
   free(params);
 }

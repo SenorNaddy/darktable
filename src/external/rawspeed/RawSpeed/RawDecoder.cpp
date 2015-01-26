@@ -82,7 +82,7 @@ void RawDecoder::decodeUncompressed(TiffIFD *rawIFD, BitOrder order) {
     ByteStream in(mFile->getData(slice.offset), slice.count);
     iPoint2D size(width, slice.h);
     iPoint2D pos(0, offY);
-    bitPerPixel = (int)((uint64)(slice.count * 8) / (slice.h * width));
+    bitPerPixel = (int)((uint64)((uint64)slice.count * 8u) / (slice.h * width));
     try {
       readUncompressedRaw(in, size, pos, width*bitPerPixel / 8, bitPerPixel, order);
     } catch (RawDecoderException &e) {
@@ -147,21 +147,31 @@ void RawDecoder::readUncompressedRaw(ByteStream &input, iPoint2D& size, iPoint2D
       }
       bits.skipBits(skipBits);
     }
-  } else if (BitOrder_Jpeg32 == order) {
-      BitPumpMSB32 bits(&input);
-      w *= cpp;
-      for (; y < h; y++) {
-        ushort16* dest = (ushort16*) & data[offset.x*sizeof(ushort16)*cpp+y*outPitch];
-        bits.checkPos();
-        for (uint32 x = 0 ; x < w; x++) {
-          uint32 b = bits.getBits(bitPerPixel);
-          dest[x] = b;
-        }
-        bits.skipBits(skipBits);
+  } else if (BitOrder_Jpeg16 == order) {
+    BitPumpMSB16 bits(&input);
+    w *= cpp;
+    for (; y < h; y++) {
+      ushort16* dest = (ushort16*) & data[offset.x*sizeof(ushort16)*cpp+y*outPitch];
+      bits.checkPos();
+      for (uint32 x = 0 ; x < w; x++) {
+        uint32 b = bits.getBits(bitPerPixel);
+        dest[x] = b;
       }
-
+      bits.skipBits(skipBits);
+    }
+  } else if (BitOrder_Jpeg32 == order) {
+    BitPumpMSB32 bits(&input);
+    w *= cpp;
+    for (; y < h; y++) {
+      ushort16* dest = (ushort16*) & data[offset.x*sizeof(ushort16)*cpp+y*outPitch];
+      bits.checkPos();
+      for (uint32 x = 0 ; x < w; x++) {
+        uint32 b = bits.getBits(bitPerPixel);
+        dest[x] = b;
+      }
+      bits.skipBits(skipBits);
+    }
   } else {
-
     if (bitPerPixel == 16 && getHostEndianness() == little)  {
       BitBlt(&data[offset.x*sizeof(ushort16)*cpp+y*outPitch], outPitch,
              input.getData(), inputPitch, w*mRaw->getBpp(), h - y);
@@ -184,6 +194,7 @@ void RawDecoder::readUncompressedRaw(ByteStream &input, iPoint2D& size, iPoint2D
     }
   }
 }
+
 
 void RawDecoder::Decode12BitRaw(ByteStream &input, uint32 w, uint32 h) {
   uchar8* data = mRaw->getData();
@@ -464,6 +475,8 @@ void RawDecoder::Decode12BitRawUnpacked(ByteStream &input, uint32 w, uint32 h) {
 bool RawDecoder::checkCameraSupported(CameraMetaData *meta, string make, string model, string mode) {
   TrimSpaces(make);
   TrimSpaces(model);
+  mRaw->metadata.make = make;
+  mRaw->metadata.model = model;
   Camera* cam = meta->getCamera(make, model, mode);
   if (!cam) {
     if (mode.length() == 0)
@@ -487,7 +500,7 @@ bool RawDecoder::checkCameraSupported(CameraMetaData *meta, string make, string 
 }
 
 void RawDecoder::setMetaData(CameraMetaData *meta, string make, string model, string mode, int iso_speed) {
-  mRaw->isoSpeed = iso_speed;
+  mRaw->metadata.isoSpeed = iso_speed;
   TrimSpaces(make);
   TrimSpaces(model);
   Camera *cam = meta->getCamera(make, model, mode);
@@ -532,6 +545,37 @@ void RawDecoder::setMetaData(CameraMetaData *meta, string make, string model, st
       }
     }
   }
+
+  // Allow overriding individual blacklevels. Values are in CFA order
+  // (the same order as the in the CFA tag)
+  // A hint could be:
+  // <Hint name="override_cfa_black" value="10,20,30,20"/>
+  if (cam->hints.find(string("override_cfa_black")) != cam->hints.end()) {
+    string rgb = cam->hints.find(string("override_cfa_black"))->second;
+    vector<string> v = split_string(rgb, ',');
+    if (v.size() != 4) {
+      mRaw->setError("Expected 4 values '10,20,30,20' as values for override_cfa_black hint.");
+    } else {
+      for (int i = 0; i < 4; i++) {
+        mRaw->blackLevelSeparate[i] = atoi(v[i].c_str());
+      }
+    }
+  }
+
+  // Allow overriding the whitebalance. Values are R,G,B multipliers
+  // A hint could be:
+  // <Hint name="override_whitebalance" value="10,20,30"/>
+  if (cam->hints.find(string("override_whitebalance")) != cam->hints.end()) {
+    string rgb = cam->hints.find(string("override_whitebalance"))->second;
+    vector<string> v = split_string(rgb, ',');
+    if (v.size() != 3) {
+      mRaw->setError("Expected 3 values '10,20,30' as values for override_whitebalance hint.");
+    } else {
+      for (int i = 0; i < 3; i++) {
+        mRaw->metadata.wbCoeffs[i] = (float) atoi(v[i].c_str());
+      }
+    }
+  }
 }
 
 
@@ -568,13 +612,14 @@ void RawDecoder::startThreads() {
     t[i].start_y = y_offset;
     t[i].end_y = MIN(y_offset + y_per_thread, mRaw->dim.y);
     t[i].parent = this;
-    pthread_create(&t[i].threadid, &attr, RawDecoderDecodeThread, &t[i]);
+    if (pthread_create(&t[i].threadid, &attr, RawDecoderDecodeThread, &t[i]) != 0) {
+      ThrowRDE("RawDecoder::startThreads: Unable to start thread");
+    }
     y_offset = t[i].end_y;
   }
 
-  void *status;
   for (uint32 i = 0; i < threads; i++) {
-    pthread_join(t[i].threadid, &status);
+    pthread_join(t[i].threadid, NULL);
   }
   if (mRaw->errors.size() >= threads)
     ThrowRDE("RawDecoder::startThreads: All threads reported errors. Cannot load image.");
@@ -590,6 +635,10 @@ RawSpeed::RawImage RawDecoder::decodeRaw()
 {
   try {
     RawImage raw = decodeRawInternal();
+    if(hints.find("pixel_aspect_ratio") != hints.end()) {
+      stringstream convert(hints.find("pixel_aspect_ratio")->second);
+      convert >> raw->metadata.pixelAspectRatio;
+    }
     if (interpolateBadPixels)
       raw->fixBadPixels();
     return raw;

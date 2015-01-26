@@ -34,18 +34,18 @@
 
 
 // we only support images with certain filename extensions via GraphicsMagick;
-// RAWs are excluded as GraphicsMagick would render them with third party 
+// RAWs are excluded as GraphicsMagick would render them with third party
 // libraries in reduced quality - slow and only 8-bit
-static gboolean 
-_supported_image(const gchar *filename)
+static gboolean _supported_image(const gchar *filename)
 {
-  const char *extensions_whitelist[] = { "tif", "tiff", "gif", "jpc", "jp2", "bmp", "dcm", "jng", "miff", "mng", "pbm", "pnm", "ppm", "pgm", NULL };
+  const char *extensions_whitelist[] = { "tif",  "tiff", "gif", "jpc", "jp2", "bmp", "dcm", "jng",
+                                         "miff", "mng",  "pbm", "pnm", "ppm", "pgm", NULL };
   gboolean supported = FALSE;
   char *ext = g_strrstr(filename, ".");
   if(!ext) return FALSE;
   ext++;
   for(const char **i = extensions_whitelist; *i != NULL; i++)
-    if(!g_ascii_strncasecmp(ext, *i,strlen(*i)))
+    if(!g_ascii_strncasecmp(ext, *i, strlen(*i)))
     {
       supported = TRUE;
       break;
@@ -54,14 +54,9 @@ _supported_image(const gchar *filename)
 }
 
 
-dt_imageio_retval_t
-dt_imageio_open_gm(
-  dt_image_t *img,
-  const char *filename,
-  dt_mipmap_cache_allocator_t a)
+dt_imageio_retval_t dt_imageio_open_gm(dt_image_t *img, const char *filename, dt_mipmap_buffer_t *mbuf)
 {
   int err = DT_IMAGEIO_FILE_CORRUPTED;
-  float *buf = NULL;
   ExceptionInfo exception;
   Image *image = NULL;
   ImageInfo *image_info = NULL;
@@ -69,18 +64,16 @@ dt_imageio_open_gm(
 
   if(!_supported_image(filename)) return DT_IMAGEIO_FILE_CORRUPTED;
 
-  if(!img->exif_inited)
-    (void) dt_exif_read(img, filename);
+  if(!img->exif_inited) (void)dt_exif_read(img, filename);
 
   GetExceptionInfo(&exception);
-  image_info=CloneImageInfo((ImageInfo *) NULL);
+  image_info = CloneImageInfo((ImageInfo *)NULL);
 
-  g_strlcpy(image_info->filename,filename,sizeof(image_info->filename));
+  g_strlcpy(image_info->filename, filename, sizeof(image_info->filename));
 
-  image=ReadImage(image_info,&exception);
-  if (exception.severity != UndefinedException)
-    CatchException(&exception);
-  if (!image)
+  image = ReadImage(image_info, &exception);
+  if(exception.severity != UndefinedException) CatchException(&exception);
+  if(!image)
   {
     fprintf(stderr, "[GraphicsMagick_open] image `%s' not found\n", img->filename);
     err = DT_IMAGEIO_FILE_NOT_FOUND;
@@ -95,9 +88,9 @@ dt_imageio_open_gm(
   img->width = width;
   img->height = height;
 
-  img->bpp = 4*sizeof(float);
+  img->bpp = 4 * sizeof(float);
 
-  float *mipbuf = (float *)dt_mipmap_cache_alloc(img, DT_MIPMAP_FULL, a);
+  float *mipbuf = (float *)dt_mipmap_cache_alloc(mbuf, img);
   if(!mipbuf)
   {
     fprintf(stderr, "[GraphicsMagick_open] could not alloc full buffer for image `%s'\n", img->filename);
@@ -105,15 +98,11 @@ dt_imageio_open_gm(
     goto error;
   }
 
-  buf = (float *)dt_alloc_align(16, width*img->bpp);
-  if(!buf) goto error;
-
-  for (uint32_t row = 0; row < height; row++)
+  for(uint32_t row = 0; row < height; row++)
   {
-    void *bufprt = (float *)buf + (size_t)4*row*img->width;
+    float *bufprt = mipbuf + (size_t)4 * row * img->width;
     int ret = DispatchImage(image, 0, row, width, 1, "RGBP", FloatPixel, bufprt, &exception);
-    if (exception.severity != UndefinedException)
-      CatchException(&exception);
+    if(exception.severity != UndefinedException) CatchException(&exception);
     if(ret != MagickPass)
     {
       fprintf(stderr, "[GraphicsMagick_open] error reading image `%s'\n", img->filename);
@@ -122,7 +111,6 @@ dt_imageio_open_gm(
     }
   }
 
-  if(buf) dt_free_align(buf);
   if(image) DestroyImage(image);
   if(image_info) DestroyImageInfo(image_info);
   DestroyExceptionInfo(&exception);
@@ -135,7 +123,6 @@ dt_imageio_open_gm(
   return DT_IMAGEIO_OK;
 
 error:
-  if(buf) dt_free_align(buf);
   if(image) DestroyImage(image);
   if(image_info) DestroyImageInfo(image_info);
   DestroyExceptionInfo(&exception);

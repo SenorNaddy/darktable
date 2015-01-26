@@ -15,6 +15,7 @@ FILE(GLOB SOURCE_FILES
   "common/colorlabels.c"
   "common/colorspaces.c"
   "common/curve_tools.c"
+  "common/cpuid.c"
   "common/darktable.c"
   "common/database.c"
   "common/dbus.c"
@@ -42,6 +43,7 @@ FILE(GLOB SOURCE_FILES
   "common/interpolation.c"
   "common/metadata.c"
   "common/mipmap_cache.c"
+  "common/pdf.c"
   "common/styles.c"
   "common/selection.c"
   "common/tags.c"
@@ -72,16 +74,15 @@ FILE(GLOB SOURCE_FILES
   "develop/tiling.c"
   "develop/masks/masks.c"
   "dtgtk/button.c"
-  "dtgtk/icon.c"
-  "dtgtk/label.c"
-  "dtgtk/slider.c"
+  "dtgtk/drawingarea.c"
+  "dtgtk/expander.c"
   "dtgtk/gradientslider.c"
-  "dtgtk/tristatebutton.c"
-  "dtgtk/togglebutton.c"
+  "dtgtk/icon.c"
   "dtgtk/paint.c"
   "dtgtk/resetlabel.c"
+  "dtgtk/sidepanel.c"
+  "dtgtk/togglebutton.c"
   "gui/accelerators.c"
-  "gui/contrast.c"
   "gui/gtkentry.c"
   "gui/guides.c"
   "gui/gtk.c"
@@ -94,6 +95,12 @@ FILE(GLOB SOURCE_FILES
   "views/undo.c"
   )
 FILE(GLOB HEADER_FILES "*.h" "common/*.h" "external/CL/*.h" "control/*.h" "iop/*.h" "libs/*.h" "views/*.h")
+
+if(APPLE)
+  list(APPEND SOURCE_FILES "osx/osx.mm")
+  list(APPEND HEADER_FILES "osx/osx.h")
+  set_source_files_properties(osx/osx.mm PROPERTIES LANGUAGE CXX)
+endif(APPLE)
 
 set(SOURCES ${SOURCE_FILES} ${HEADER_FILES})
 
@@ -110,10 +117,10 @@ set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=c99")
 find_package(OpenMP)
 if(OpenMP_C_FLAGS AND USE_OPENMP)
   set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
   if(WIN32)
     list(APPEND LIBS gomp)
   endif(WIN32)
-  add_definitions("-DHAVE_OPENMP")
 endif(OpenMP_C_FLAGS AND USE_OPENMP)
 
 if(USE_DARKTABLE_PROFILING)
@@ -124,15 +131,11 @@ endif()
 #
 # Find all other required libraries for building
 #
-find_package(Glib 2.30 REQUIRED)
-include_directories(SYSTEM ${Glib_INCLUDE_DIRS})
-list(APPEND LIBS ${Glib_LIBRARIES})
-add_definitions(${Glib_DEFINITIONS})
-
-find_package(GTK2 2.24 REQUIRED gtk)
-include_directories(SYSTEM ${GTK2_INCLUDE_DIRS})
-list(APPEND LIBS ${GTK2_LIBRARIES})
-add_definitions(${GTK2_DEFINITIONS})
+# GTK3 pulls in ATK, GDK, GDK-PIXBUF, CAIRO, GLIB, PANGO
+find_package(GTK3 3.10 REQUIRED) # actually it's 3.12, but Ubuntu 14.04 LTS only ships 3.10, so we #define the rest
+include_directories(${GTK3_INCLUDE_DIRS})
+list(APPEND LIBS ${GTK3_LIBRARIES})
+add_definitions(${GTK3_DEFINITIONS})
 
 # Check for libxml2 / broken cmake module can't be included in the foreach() below
 find_package(LibXml2 2.6 REQUIRED)
@@ -148,13 +151,13 @@ if(USE_CAMERA_SUPPORT)
   add_definitions(${Gphoto2_DEFINITIONS})
 endif(USE_CAMERA_SUPPORT)
 
-# INotify isn't used anymore as it seems
-find_package(INotify)
-if(INOTIFY_FOUND)
-  include_directories(SYSTEM ${INOTIFY_INCLUDE_DIRS})
-  list(APPEND LIBS ${INOTIFY_LIBRARIES})
-  add_definitions(${INOTIFY_DEFINITIONS})
-endif(INOTIFY_FOUND)
+# # INotify isn't used anymore as it seems
+# find_package(INotify)
+# if(INOTIFY_FOUND)
+#   include_directories(SYSTEM ${INOTIFY_INCLUDE_DIRS})
+#   list(APPEND LIBS ${INOTIFY_LIBRARIES})
+#   add_definitions(${INOTIFY_DEFINITIONS})
+# endif(INOTIFY_FOUND)
 
 if(USE_OPENEXR)
   find_package(OpenEXR)
@@ -176,8 +179,7 @@ if(USE_WEBP)
   else(USE_WEBP)
 endif(USE_WEBP)
 
-# Find all the libs that don't require extra parameters
-foreach(lib ${OUR_LIBS} LensFun GIO GThread GModule Cairo PangoCairo PThread Rsvg2 GDK-PixBuf LibXml2 Sqlite3 Exiv2 CURL PNG JPEG TIFF LCMS2)
+foreach(lib ${OUR_LIBS} LensFun GIO GThread GModule PangoCairo PThread Rsvg2 LibXml2 Sqlite3 Exiv2 CURL PNG JPEG TIFF LCMS2)
   find_package(${lib} REQUIRED)
   include_directories(SYSTEM ${${lib}_INCLUDE_DIRS})
   list(APPEND LIBS ${${lib}_LIBRARIES})
@@ -232,15 +234,43 @@ endif(USE_OPENJPEG)
 #
 # Detect compile of optional pwstorage backends
 #
+if(USE_LIBSECRET AND JsonGlib_FOUND)
+  find_package(Libsecret)
+  if(LIBSECRET_FOUND)
+    if(LIBSECRET_VERSION VERSION_LESS "0.16")
+      message(STATUS "Found libsecret version ${LIBSECRET_VERSION}. You need at least libsecret 0.16 or newer.")
+      set(LIBSECRET_FOUND FALSE)
+    else()
+      if(LIBSECRET_VERSION VERSION_LESS "0.18")
+        message(STATUS "Found libsecret version ${LIBSECRET_VERSION}. Enable unstable API. Please upgrade to version 0.18 or newer.")
+        add_definitions("-DSECRET_API_SUBJECT_TO_CHANGE")
+      endif()
+      set(SOURCES ${SOURCES} "common/pwstorage/backend_libsecret.c")
+      include_directories(SYSTEM ${LIBSECRET_INCLUDE_DIRS})
+      list(APPEND LIBS ${LIBSECRET_LIBRARIES})
+      add_definitions("-DHAVE_LIBSECRET")
+    endif()
+  endif(LIBSECRET_FOUND)
+endif(USE_LIBSECRET AND JsonGlib_FOUND)
+
 if(USE_GNOME_KEYRING)
   find_package(GnomeKeyring)
   if(GNOMEKEYRING_FOUND)
-    set(SOURCES ${SOURCES} "common/pwstorage/backend_gkeyring.c")
-    include_directories(SYSTEM ${GnomeKeyring_INCLUDE_DIRS})
-    list(APPEND LIBS ${GnomeKeyring_LIBRARIES})
-    add_definitions("-DHAVE_GKEYRING")
+    if(${GnomeKeyring_VERSION} VERSION_LESS "3.12.0")
+      set(SOURCES ${SOURCES} "common/pwstorage/backend_gkeyring.c")
+      include_directories(SYSTEM ${GnomeKeyring_INCLUDE_DIRS})
+      list(APPEND LIBS ${GnomeKeyring_LIBRARIES})
+      add_definitions("-DHAVE_GKEYRING")
+    else(${GnomeKeyring_VERSION} VERSION_LESS "3.12.0")
+      message(STATUS "GnomeKeyring is only supported for versions older than 3.12.0, version ${GnomeKeyring_VERSION} found. Please use libsecret instead.")
+      set(GNOMEKEYRING_FOUND FALSE)
+    endif(${GnomeKeyring_VERSION} VERSION_LESS "3.12.0")
   endif(GNOMEKEYRING_FOUND)
 endif(USE_GNOME_KEYRING)
+
+if(USE_KWALLET)
+  add_definitions("-DHAVE_KWALLET")
+endif(USE_KWALLET)
 
 if(USE_MAC_INTEGRATION)
   find_package(MacIntegration)
@@ -281,9 +311,9 @@ endif(APRIL_FOOLS)
 #
 # Add HAVE_xxx defines used by darktable
 #
-if(INOTIFY_FOUND)
-  add_definitions("-DHAVE_INOTIFY")
-endif(INOTIFY_FOUND)
+# if(INOTIFY_FOUND)
+#   add_definitions("-DHAVE_INOTIFY")
+# endif(INOTIFY_FOUND)
 
 if(LENSFUN_FOUND)
   add_definitions("-DHAVE_LENSFUN")
@@ -398,9 +428,10 @@ set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} -D_DEBUG")
 set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -D_DEBUG")
 
 #
-# Generate config.h
+# Generate config.h and version.h. they are split so that a change to version.h isn't recompiling half of dt
 #
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/config.cmake.h" "${CMAKE_CURRENT_BINARY_DIR}/config.h" @ONLY)
+configure_file("${CMAKE_CURRENT_SOURCE_DIR}/version.cmake.h" "${CMAKE_CURRENT_BINARY_DIR}/version.h" @ONLY)
 include_directories("${CMAKE_CURRENT_BINARY_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}")
 
 #
@@ -411,7 +442,7 @@ if(USE_LUA)
   if(LUA52_FOUND)
     message(STATUS "Lua support: Enabled")
     include_directories(SYSTEM ${LUA52_INCLUDE_DIRS})
-    list(APPEND LIBS ${LUA52_LIBRARIES})
+    list(APPEND LIBS ${LUA52_LDFLAGS})
   else()
     if(DONT_USE_INTERNAL_LUA)
       message(STATUS "Lua support: System library not found (to use darktable's version use -DDONT_USE_INTERNAL_LUA=Off)")
@@ -448,6 +479,15 @@ if(USE_LUA)
       "lua/tags.c"
       "lua/types.c"
       "lua/view.c"
+      "lua/widget/widget.c"
+      "lua/widget/box.c"
+      "lua/widget/button.c"
+      "lua/widget/check_button.c"
+      "lua/widget/combobox.c"
+      "lua/widget/entry.c"
+      "lua/widget/file_chooser.c"
+      "lua/widget/label.c"
+      "lua/widget/separator.c"
       )
     set(SOURCES ${SOURCES} ${SOURCE_FILES_LUA})
   endif(USE_LUA)
@@ -467,36 +507,28 @@ add_subdirectory(external/LibRaw)
 list(APPEND LIB_DEPS libraw_r)
 list(APPEND STATIC_LIBS libraw_static)
 
-# same for librawspeed (can switch it off with -DDONT_USE_RAWSPEED, for macs):
-if(NOT DONT_USE_RAWSPEED)
-  add_definitions("-DHAVE_RAWSPEED")
-  add_library(rawspeed_static STATIC IMPORTED)
-  set_target_properties(rawspeed_static PROPERTIES IMPORTED_LOCATION ${CMAKE_CURRENT_BINARY_DIR}/external/rawspeed/librawspeed.a)
-  # compile rawspeed
-  add_subdirectory(external/rawspeed)
-  list(APPEND LIB_DEPS rawspeed)
-  list(APPEND STATIC_LIBS rawspeed_static)
-endif(NOT DONT_USE_RAWSPEED)
+# same for librawspeed
+add_library(rawspeed_static STATIC IMPORTED)
+set_target_properties(rawspeed_static PROPERTIES IMPORTED_LOCATION ${CMAKE_CURRENT_BINARY_DIR}/external/rawspeed/librawspeed.a)
+# compile rawspeed
+add_subdirectory(external/rawspeed)
+list(APPEND LIB_DEPS rawspeed)
+list(APPEND STATIC_LIBS rawspeed_static)
 
 # osm gps map library
 if(USE_GEO)
-  find_package(LibSoup2)
-  if(LIBSOUP2_FOUND)
-    include_directories(SYSTEM ${LIBSOUP2_INCLUDE_DIRS})
-    add_definitions(${LIBSOUP2_DEFINITIONS})
-    include_directories(${CMAKE_CURRENT_SOURCE_DIR}/external/osm-gps-map/src)
-    add_library(osmgpsmap_static STATIC IMPORTED)
-    set_target_properties(osmgpsmap_static PROPERTIES IMPORTED_LOCATION ${CMAKE_CURRENT_BINARY_DIR}/external/osm-gps-map/libosmgpsmap.a)
-    add_subdirectory(external/osm-gps-map)
-    list(APPEND LIB_DEPS osmgpsmap)
-    list(APPEND LIBS ${LIBSOUP2_LIBRARIES})
-    list(APPEND STATIC_LIBS osmgpsmap_static)
-    add_definitions("-DHAVE_MAP")
+  find_package(OSMGpsMap)
+  if(OSMGPSMAP_FOUND)
     message(STATUS "Map mode: enabled")
-  else(LIBSOUP2_FOUND)
+    add_definitions("-DHAVE_MAP")
+    include_directories(SYSTEM ${OSMGPSMAP_INCLUDE_DIRS})
+    list(APPEND LIBS ${OSMGPSMAP_LIBRARIES})
+    add_definitions(${OSMGPSMAP_DEFINITIONS})
+  else(OSMGPSMAP_FOUND)
     set(USE_GEO OFF)
-    message(STATUS "Map mode: disabled, please install libsoup2")
-  endif(LIBSOUP2_FOUND)
+    message(STATUS "Map mode: disabled, please install libosmgpsmap")
+  endif(OSMGPSMAP_FOUND)
+
 else(USE_GEO)
   message(STATUS "Map mode: disabled")
 endif(USE_GEO)
@@ -505,31 +537,27 @@ endif(USE_GEO)
 if(USE_COLORD)
   find_package(Colord)
   if(COLORD_FOUND)
-    add_definitions("-DUSE_COLORDGTK")
-    include_directories(SYSTEM ${COLORD_INCLUDE_DIRS})
-    # we ship our own copy of libcolord-gtk - the one packaged in distros is linked against gtk3 :(
-    include_directories(${CMAKE_CURRENT_SOURCE_DIR}/external/colord-gtk/src)
-    add_library(colord-gtk_static STATIC IMPORTED)
-    set_target_properties(colord-gtk_static PROPERTIES IMPORTED_LOCATION ${CMAKE_CURRENT_BINARY_DIR}/external/colord-gtk/libcolord-gtk.a)
-    add_subdirectory(external/colord-gtk)
-    add_dependencies(colord-gtk colord)
-    list(APPEND LIB_DEPS colord-gtk)
-    list(APPEND LIBS ${COLORD_LIBRARIES})
-    list(APPEND STATIC_LIBS colord-gtk_static)
+    find_package(ColordGTK)
+    if(COLORDGTK_FOUND)
+      # We might make use of colord directly so link against it explicitly. just in case. move up if it is used without colord-gtk, too.
+      include_directories(SYSTEM ${COLORD_INCLUDE_DIRS})
+      list(APPEND LIBS ${COLORD_LIBRARIES})
+      add_definitions(${COLORD_DEFINITIONS})
+
+      # ... and also against libcolord-gtk to get the display profile
+      include_directories(SYSTEM ${COLORDGTK_INCLUDE_DIRS})
+      list(APPEND LIBS ${COLORDGTK_LIBRARIES})
+      add_definitions(${COLORDGTK_DEFINITIONS})
+      add_definitions("-DUSE_COLORDGTK")
+    else(COLORDGTK_FOUND)
+      message(STATUS "No libcolord-gtk found, this build will lack the ability to get the screen profile from colord")
+      set(USE_COLORD OFF)
+    endif(COLORDGTK_FOUND)
   else(COLORD_FOUND)
+    message(STATUS "No libcolord found, this build will lack the ability to get the screen profile from colord")
     set(USE_COLORD OFF)
   endif(COLORD_FOUND)
 endif(USE_COLORD)
-
-if(USE_SQUISH)
-  # libsquish for compressed thumbnails:
-  add_definitions("-DHAVE_SQUISH")
-  add_library(squish_static STATIC IMPORTED)
-  set_target_properties(squish_static PROPERTIES IMPORTED_LOCATION ${CMAKE_CURRENT_BINARY_DIR}/external/squish/libsquish.a)
-  add_subdirectory(external/squish)
-  list(APPEND LIB_DEPS squish)
-  list(APPEND STATIC_LIBS squish_static)
-endif(USE_SQUISH)
 
 if(USE_LUA)
   if(NOT LUA52_FOUND)
@@ -538,7 +566,7 @@ if(USE_LUA)
   # liblautoc for lua automated interface generation
   add_library(lautoc_static STATIC IMPORTED)
   set_target_properties(lautoc_static PROPERTIES IMPORTED_LOCATION ${CMAKE_CURRENT_BINARY_DIR}/external/LuaAutoC/liblautoc.a)
-  include_directories(${CMAKE_CURRENT_SOURCE_DIR}/external/LuaAutoC/include)
+  include_directories(${CMAKE_CURRENT_SOURCE_DIR}/external/LuaAutoC/)
   add_subdirectory(external/LuaAutoC)
   list(APPEND LIB_DEPS lautoc)
   list(APPEND STATIC_LIBS lautoc_static)
@@ -565,6 +593,18 @@ if(NOT SOURCE_PACKAGE AND NOT APPLE)
   # apple build fails on deprecated warnings..
   set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Werror -Werror=type-limits")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Werror -Werror=type-limits")
+
+  #gtk3 porting: disable -Werror=deprecated-declarations for now
+  message(WARNING "REMOVE BEFORE FLIGHT")
+  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wno-error=deprecated-declarations")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-error=deprecated-declarations")
+
+  # instead, disable deprecated stuff one-by-one after fixing it
+  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -D__GTK_STOCK_H__ -D__GTK_ACTION_GROUP_H__ -D__GTK_UI_MANAGER_H__")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -D__GTK_STOCK_H__ -D__GTK_ACTION_GROUP_H__ -D__GTK_UI_MANAGER_H__")
+
+  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -D__GTK_COLOR_SELECTION_DIALOG_H__")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -D__GTK_COLOR_SELECTION_DIALOG_H__")
 elseif(SOURCE_PACKAGE)
   set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -D_RELEASE")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -D_RELEASE")
@@ -589,8 +629,8 @@ add_definitions("-DGSEAL_ENABLE")
 #
 #  Do not use deprecated symbols
 #
-add_definitions("-DGDK_DISABLE_DEPRECATED")
-add_definitions("-DGTK_DISABLE_DEPRECATED")
+#add_definitions("-DGDK_DISABLE_DEPRECATED")
+#add_definitions("-DGTK_DISABLE_DEPRECATED")
 add_definitions("-Werror=implicit-function-declaration")
 ###### GTK+3 port ######
 
@@ -717,7 +757,7 @@ if(NOT WIN32)
 endif(NOT WIN32)
 set_target_properties(darktable PROPERTIES LINKER_LANGUAGE C)
 if(APPLE)
-  set_target_properties(lib_darktable PROPERTIES LINK_FLAGS "-framework Carbon")
+  set_target_properties(lib_darktable PROPERTIES LINK_FLAGS "-framework Carbon -framework AppKit")
 endif(APPLE)
 target_link_libraries(darktable ${LIBS})
 install(TARGETS darktable DESTINATION bin)

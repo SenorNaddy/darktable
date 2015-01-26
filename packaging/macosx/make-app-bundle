@@ -22,6 +22,11 @@ then
 	dsymutil package/darktable.app/Contents/MacOS/darktable-cli-bin
 fi
 
+if [ -n "$CODECERT" ]
+then
+	codesign --deep --verbose --force -s "${CODECERT}" package/darktable.app
+fi
+
 PROGN=darktable
 
 # Creating temporary rw image
@@ -29,13 +34,12 @@ hdiutil create -srcfolder package -volname "${PROGN}" -fs HFS+ \
       -fsargs "-c c=64,a=16,e=16" -format UDRW pack.temp.dmg
 
 # mounting image without autoopen to create window style params
-device=$(hdiutil attach -readwrite -noverify -noautoopen "pack.temp.dmg" | \
+device=$(hdiutil attach -readwrite -noverify -autoopen "pack.temp.dmg" | \
          egrep '^/dev/' | sed 1q | awk '{print $1}')
+
 echo '
  tell application "Finder"
 	tell disk "'${PROGN}'"
-		close
-		open
 		set current view of container window to icon view
 		set toolbar visible of container window to false
 		set statusbar visible of container window to false

@@ -5,7 +5,7 @@
     RawSpeed - RAW file decoder.
 
     Copyright (C) 2009-2014 Klaus Post
-    Copyright (C) 2014 Pedro Côrte-Real
+    Copyright (C) 2014-2015 Pedro Côrte-Real
 
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Lesser General Public
@@ -27,7 +27,8 @@ namespace RawSpeed {
 
 RafDecoder::RafDecoder(TiffIFD *rootIFD, FileMap* file) :
     RawDecoder(file), mRootIFD(rootIFD) {
-      decoderVersion = 1;
+  decoderVersion = 1;
+  alt_layout = FALSE;
 }
 RafDecoder::~RafDecoder(void) {
   if (mRootIFD)
@@ -45,7 +46,6 @@ RawImage RafDecoder::decodeRawInternal() {
   mFile = raw->getFileMap();
   uint32 height = 0;
   uint32 width = 0;
-  alt_layout = FALSE;
 
   if (raw->hasEntry(FUJI_RAWIMAGEFULLHEIGHT)) {
     height = raw->getEntry(FUJI_RAWIMAGEFULLHEIGHT)->getInt();
@@ -84,15 +84,26 @@ RawImage RafDecoder::decodeRawInternal() {
   // x-trans sensors report 14bpp, but data isn't packed so read as 16bpp
   if (bps == 14) bps = 16;
 
-  mRaw->dim = iPoint2D(width, height);
+  // Some fuji SuperCCD cameras include a second raw image next to the first one
+  // that is identical but darker to the first. The two combined can produce
+  // a higher dynamic range image. Right now we're ignoring it.
+  bool double_width = hints.find("double_width_unpacked") != hints.end();
+
+  mRaw->dim = iPoint2D(width*(double_width ? 2 : 1), height);
   mRaw->createData();
   ByteStream input(mFile->getData(off), mFile->getSize() - off);
   iPoint2D pos(0, 0);
 
-  if (mRootIFD->endian == big)
+  if (double_width) {
+    Decode16BitRawUnpacked(input, width*2, height);
+  } else if (mRootIFD->endian == big) {
     Decode16BitRawBEunpacked(input, width, height);
-  else
-    readUncompressedRaw(input, mRaw->dim, pos, width*bps/8, bps, BitOrder_Plain);
+  } else {
+    if (hints.find("jpeg32_bitorder") != hints.end())
+      readUncompressedRaw(input, mRaw->dim, pos, width*bps/8, bps, BitOrder_Jpeg32);
+    else
+      readUncompressedRaw(input, mRaw->dim, pos, width*bps/8, bps, BitOrder_Plain);
+  }
 
   return mRaw;
 }
@@ -126,7 +137,7 @@ void RafDecoder::decodeMetaDataInternal(CameraMetaData *meta) {
   int iso = 0;
   if (mRootIFD->hasEntryRecursive(ISOSPEEDRATINGS))
     iso = mRootIFD->getEntryRecursive(ISOSPEEDRATINGS)->getInt();
-  mRaw->isoSpeed = iso;
+  mRaw->metadata.isoSpeed = iso;
 
   // This is where we'd normally call setMetaData but since we may still need
   // to rotate the image for SuperCCD cameras we do everything ourselves
@@ -141,9 +152,12 @@ void RafDecoder::decodeMetaDataInternal(CameraMetaData *meta) {
   if (applyCrop) {
     new_size = cam->cropSize;
     crop_offset = cam->cropPos;
+    bool double_width = hints.find("double_width_unpacked") != hints.end();
     // If crop size is negative, use relative cropping
     if (new_size.x <= 0)
-      new_size.x = mRaw->dim.x - cam->cropPos.x + new_size.x;
+      new_size.x = mRaw->dim.x / (double_width ? 2 : 1) - cam->cropPos.x + new_size.x;
+    else
+      new_size.x /= (double_width ? 2 : 1);
 
     if (new_size.y <= 0)
       new_size.y = mRaw->dim.y - cam->cropPos.y + new_size.y;
@@ -156,14 +170,22 @@ void RafDecoder::decodeMetaDataInternal(CameraMetaData *meta) {
   if (rotate && !this->uncorrectedRawValues) {
     // Calculate the 45 degree rotated size;
     uint32 rotatedsize;
-    if (alt_layout)
+    uint32 rotationPos;
+    if (alt_layout) {
       rotatedsize = new_size.y+new_size.x/2;
-    else
+      rotationPos = new_size.x/2 - 1;
+    }
+    else {
       rotatedsize = new_size.x+new_size.y/2;
+      rotationPos = new_size.x - 1;
+    }
 
-    iPoint2D final_size(rotatedsize, rotatedsize);
+    iPoint2D final_size(rotatedsize, rotatedsize-1);
     RawImage rotated = RawImage::create(final_size, TYPE_USHORT16, 1);
     rotated->clearArea(iRectangle2D(iPoint2D(0,0), rotated->dim));
+    rotated->metadata = mRaw->metadata;
+    rotated->metadata.fujiRotationPos = rotationPos;
+
     int dest_pitch = (int)rotated->pitch / 2;
     ushort16 *dst = (ushort16*)rotated->getData(0,0);
 
@@ -194,6 +216,24 @@ void RafDecoder::decodeMetaDataInternal(CameraMetaData *meta) {
   mRaw->whitePoint = sensor->mWhiteLevel;
   mRaw->blackAreas = cam->blackAreas;
   mRaw->cfa = cam->cfa;
+
+  if (mRootIFD->hasEntryRecursive(FUJI_WB_GRBLEVELS)) {
+    TiffEntry *wb = mRootIFD->getEntryRecursive(FUJI_WB_GRBLEVELS);
+    if (wb->count == 3) {
+      const uint32 *tmp = wb->getIntArray();
+      mRaw->metadata.wbCoeffs[0] = (float)tmp[1];
+      mRaw->metadata.wbCoeffs[1] = (float)tmp[0];
+      mRaw->metadata.wbCoeffs[2] = (float)tmp[2];
+    }
+  } else if (mRootIFD->hasEntryRecursive(FUJIOLDWB)) {
+    TiffEntry *wb = mRootIFD->getEntryRecursive(FUJIOLDWB);
+    if (wb->count == 8) {
+      const ushort16 *tmp = wb->getShortArray();
+      mRaw->metadata.wbCoeffs[0] = (float)tmp[1];
+      mRaw->metadata.wbCoeffs[1] = (float)tmp[0];
+      mRaw->metadata.wbCoeffs[2] = (float)tmp[3];
+    }
+  }
 }
 
 

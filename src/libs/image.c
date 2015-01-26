@@ -36,16 +36,12 @@ DT_MODULE(1)
 
 typedef struct dt_lib_image_t
 {
-  GtkWidget
-  *rotate_cw_button, *rotate_ccw_button, *remove_button,
-  *delete_button, *create_hdr_button, *duplicate_button, *reset_button,
-  *move_button, *copy_button, *group_button, *ungroup_button, *cache_button,
-  *uncache_button;
-}
-dt_lib_image_t;
+  GtkWidget *rotate_cw_button, *rotate_ccw_button, *remove_button, *delete_button, *create_hdr_button,
+      *duplicate_button, *reset_button, *move_button, *copy_button, *group_button, *ungroup_button,
+      *cache_button, *uncache_button;
+} dt_lib_image_t;
 
-const char*
-name ()
+const char *name()
 {
   return _("selected image[s]");
 }
@@ -62,17 +58,16 @@ uint32_t container()
 
 /** merges all the selected images into a single group.
  * if there is an expanded group, then they will be joined there, otherwise a new one will be created. */
-static void
-_group_helper_function(void)
+static void _group_helper_function(void)
 {
   int new_group_id = darktable.gui->expanded_group_id;
   sqlite3_stmt *stmt;
-  DT_DEBUG_SQLITE3_PREPARE_V2(dt_database_get(darktable.db), "select distinct imgid from selected_images", -1, &stmt, NULL);
+  DT_DEBUG_SQLITE3_PREPARE_V2(dt_database_get(darktable.db), "select distinct imgid from selected_images", -1,
+                              &stmt, NULL);
   while(sqlite3_step(stmt) == SQLITE_ROW)
   {
     int id = sqlite3_column_int(stmt, 0);
-    if(new_group_id == -1)
-      new_group_id = id;
+    if(new_group_id == -1) new_group_id = id;
     dt_grouping_add_to_group(new_group_id, id);
   }
   sqlite3_finalize(stmt);
@@ -85,11 +80,11 @@ _group_helper_function(void)
 }
 
 /** removes the selected images from their current group. */
-static void
-_ungroup_helper_function(void)
+static void _ungroup_helper_function(void)
 {
   sqlite3_stmt *stmt;
-  DT_DEBUG_SQLITE3_PREPARE_V2(dt_database_get(darktable.db), "select distinct imgid from selected_images", -1, &stmt, NULL);
+  DT_DEBUG_SQLITE3_PREPARE_V2(dt_database_get(darktable.db), "select distinct imgid from selected_images", -1,
+                              &stmt, NULL);
   while(sqlite3_step(stmt) == SQLITE_ROW)
   {
     int id = sqlite3_column_int(stmt, 0);
@@ -101,143 +96,145 @@ _ungroup_helper_function(void)
   dt_control_queue_redraw_center();
 }
 
-static void
-button_clicked(GtkWidget *widget, gpointer user_data)
+static void button_clicked(GtkWidget *widget, gpointer user_data)
 {
   int i = GPOINTER_TO_INT(user_data);
-  if     (i == 0) dt_control_remove_images();
-  else if(i == 1) dt_control_delete_images();
+  if(i == 0)
+    dt_control_remove_images();
+  else if(i == 1)
+    dt_control_delete_images();
   // else if(i == 2) dt_control_write_sidecar_files();
-  else if(i == 3) dt_control_duplicate_images();
-  else if(i == 4) dt_control_flip_images(0);
-  else if(i == 5) dt_control_flip_images(1);
-  else if(i == 6) dt_control_flip_images(2);
-  else if(i == 7) dt_control_merge_hdr();
-  else if(i == 8) dt_control_move_images();
-  else if(i == 9) dt_control_copy_images();
-  else if(i == 10) _group_helper_function();
-  else if(i == 11) _ungroup_helper_function();
-  else if(i == 12) dt_control_set_local_copy_images();
-  else if(i == 13) dt_control_reset_local_copy_images();
+  else if(i == 3)
+    dt_control_duplicate_images();
+  else if(i == 4)
+    dt_control_flip_images(0);
+  else if(i == 5)
+    dt_control_flip_images(1);
+  else if(i == 6)
+    dt_control_flip_images(2);
+  else if(i == 7)
+    dt_control_merge_hdr();
+  else if(i == 8)
+    dt_control_move_images();
+  else if(i == 9)
+    dt_control_copy_images();
+  else if(i == 10)
+    _group_helper_function();
+  else if(i == 11)
+    _ungroup_helper_function();
+  else if(i == 12)
+    dt_control_set_local_copy_images();
+  else if(i == 13)
+    dt_control_reset_local_copy_images();
 }
 
-int
-position ()
+int position()
 {
   return 700;
 }
 
-void
-gui_init (dt_lib_module_t *self)
+void gui_init(dt_lib_module_t *self)
 {
   dt_lib_image_t *d = (dt_lib_image_t *)malloc(sizeof(dt_lib_image_t));
   self->data = (void *)d;
-  self->widget = gtk_vbox_new(TRUE, 5);
-  GtkBox *hbox;
+  self->widget = gtk_grid_new();
+  GtkGrid *grid = GTK_GRID(self->widget);
+  gtk_grid_set_row_spacing(grid, DT_PIXEL_APPLY_DPI(5));
+  gtk_grid_set_column_spacing(grid, DT_PIXEL_APPLY_DPI(5));
+  gtk_grid_set_column_homogeneous(grid, TRUE);
+  int line = 0;
+
   GtkWidget *button;
-  hbox = GTK_BOX(gtk_hbox_new(TRUE, 5));
 
   button = gtk_button_new_with_label(_("remove"));
   d->remove_button = button;
   g_object_set(G_OBJECT(button), "tooltip-text", _("remove from the collection"), (char *)NULL);
-  gtk_box_pack_start(hbox, button, TRUE, TRUE, 0);
+  gtk_grid_attach(grid, button, 0, line, 2, 1);
   g_signal_connect(G_OBJECT(button), "clicked", G_CALLBACK(button_clicked), GINT_TO_POINTER(0));
 
   button = gtk_button_new_with_label(_("delete"));
   d->delete_button = button;
   g_object_set(G_OBJECT(button), "tooltip-text", _("physically delete from disk"), (char *)NULL);
-  gtk_box_pack_start(hbox, button, TRUE, TRUE, 0);
+  gtk_grid_attach(grid, button, 2, line++, 2, 1);
   g_signal_connect(G_OBJECT(button), "clicked", G_CALLBACK(button_clicked), GINT_TO_POINTER(1));
 
-  gtk_box_pack_start(GTK_BOX(self->widget), GTK_WIDGET(hbox), TRUE, TRUE, 0);
-  hbox = GTK_BOX(gtk_hbox_new(TRUE, 5));
 
   button = gtk_button_new_with_label(_("move"));
   d->move_button = button;
   g_object_set(G_OBJECT(button), "tooltip-text", _("move to other folder"), (char *)NULL);
-  gtk_box_pack_start(hbox, button, TRUE, TRUE, 0);
+  gtk_grid_attach(grid, button, 0, line, 2, 1);
   g_signal_connect(G_OBJECT(button), "clicked", G_CALLBACK(button_clicked), GINT_TO_POINTER(8));
 
   button = gtk_button_new_with_label(_("copy"));
   d->copy_button = button;
   g_object_set(G_OBJECT(button), "tooltip-text", _("copy to other folder"), (char *)NULL);
-  gtk_box_pack_start(hbox, button, TRUE, TRUE, 0);
+  gtk_grid_attach(grid, button, 2, line++, 2, 1);
   g_signal_connect(G_OBJECT(button), "clicked", G_CALLBACK(button_clicked), GINT_TO_POINTER(9));
 
 
-  gtk_box_pack_start(GTK_BOX(self->widget), GTK_WIDGET(hbox), TRUE, TRUE, 0);
-  hbox = GTK_BOX(gtk_hbox_new(TRUE, 5));
-
   button = gtk_button_new_with_label(_("create HDR"));
   d->create_hdr_button = button;
-  gtk_box_pack_start(hbox, button, TRUE, TRUE, 0);
+  gtk_grid_attach(grid, button, 0, line, 2, 1);
   g_signal_connect(G_OBJECT(button), "clicked", G_CALLBACK(button_clicked), GINT_TO_POINTER(7));
-  g_object_set(G_OBJECT(button), "tooltip-text", _("create a high dynamic range image from selected shots"), (char *)NULL);
+  g_object_set(G_OBJECT(button), "tooltip-text", _("create a high dynamic range image from selected shots"),
+               (char *)NULL);
 
   button = gtk_button_new_with_label(_("duplicate"));
   d->duplicate_button = button;
-  g_object_set(G_OBJECT(button), "tooltip-text", _("add a duplicate to the collection, including its history stack"), (char *)NULL);
-  gtk_box_pack_start(hbox, button, TRUE, TRUE, 0);
+  g_object_set(G_OBJECT(button), "tooltip-text",
+               _("add a duplicate to the collection, including its history stack"), (char *)NULL);
+  gtk_grid_attach(grid, button, 2, line++, 2, 1);
   g_signal_connect(G_OBJECT(button), "clicked", G_CALLBACK(button_clicked), GINT_TO_POINTER(3));
 
-  gtk_box_pack_start(GTK_BOX(self->widget), GTK_WIDGET(hbox), TRUE, TRUE, 0);
-  hbox = GTK_BOX(gtk_hbox_new(TRUE, 5));
 
-  GtkBox *hbox2 = GTK_BOX(gtk_hbox_new(TRUE, 5));
-  button = dtgtk_button_new(dtgtk_cairo_paint_refresh, 0);
+  button = dtgtk_button_new(dtgtk_cairo_paint_refresh, CPF_DO_NOT_USE_BORDER);
   d->rotate_ccw_button = button;
   g_object_set(G_OBJECT(button), "tooltip-text", _("rotate selected images 90 degrees CCW"), (char *)NULL);
-  gtk_box_pack_start(hbox2, button, TRUE, TRUE, 0);
+  gtk_grid_attach(grid, button, 0, line, 1, 1);
   g_signal_connect(G_OBJECT(button), "clicked", G_CALLBACK(button_clicked), GINT_TO_POINTER(4));
 
-  button = dtgtk_button_new(dtgtk_cairo_paint_refresh, 1);
+  button = dtgtk_button_new(dtgtk_cairo_paint_refresh, 1 | CPF_DO_NOT_USE_BORDER);
   d->rotate_cw_button = button;
   g_object_set(G_OBJECT(button), "tooltip-text", _("rotate selected images 90 degrees CW"), (char *)NULL);
-  gtk_box_pack_start(hbox2, button, TRUE, TRUE, 0);
+  gtk_grid_attach(grid, button, 1, line, 1, 1);
   g_signal_connect(G_OBJECT(button), "clicked", G_CALLBACK(button_clicked), GINT_TO_POINTER(5));
-  gtk_box_pack_start(hbox, GTK_WIDGET(hbox2), TRUE, TRUE, 0);
 
   button = gtk_button_new_with_label(_("reset rotation"));
   d->reset_button = button;
   g_object_set(G_OBJECT(button), "tooltip-text", _("reset rotation to EXIF data"), (char *)NULL);
-  gtk_box_pack_start(hbox, button, TRUE, TRUE, 0);
+  gtk_grid_attach(grid, button, 2, line++, 2, 1);
   g_signal_connect(G_OBJECT(button), "clicked", G_CALLBACK(button_clicked), GINT_TO_POINTER(6));
 
-  gtk_box_pack_start(GTK_BOX(self->widget), GTK_WIDGET(hbox), TRUE, TRUE, 0);
-  hbox = GTK_BOX(gtk_hbox_new(TRUE, 5));
 
   button = gtk_button_new_with_label(_("copy locally"));
   d->cache_button = button;
   g_object_set(G_OBJECT(button), "tooltip-text", _("copy the image locally"), (char *)NULL);
-  gtk_box_pack_start(hbox, button, TRUE, TRUE, 0);
+  gtk_grid_attach(grid, button, 0, line, 2, 1);
   g_signal_connect(G_OBJECT(button), "clicked", G_CALLBACK(button_clicked), GINT_TO_POINTER(12));
 
   button = gtk_button_new_with_label(_("resync local copy"));
   d->uncache_button = button;
-  g_object_set(G_OBJECT(button), "tooltip-text", _("synchronize the image's XMP and remove the local copy"), (char *)NULL);
-  gtk_box_pack_start(hbox, button, TRUE, TRUE, 0);
+  g_object_set(G_OBJECT(button), "tooltip-text", _("synchronize the image's XMP and remove the local copy"),
+               (char *)NULL);
+  gtk_grid_attach(grid, button, 2, line++, 2, 1);
   g_signal_connect(G_OBJECT(button), "clicked", G_CALLBACK(button_clicked), GINT_TO_POINTER(13));
 
-  gtk_box_pack_start(GTK_BOX(self->widget), GTK_WIDGET(hbox), TRUE, TRUE, 0);
-  hbox = GTK_BOX(gtk_hbox_new(TRUE, 5));
 
   button = gtk_button_new_with_label(_("group"));
   d->group_button = button;
-  g_object_set(G_OBJECT(button), "tooltip-text", _("add selected images to expanded group or create a new one"), (char *)NULL);
-  gtk_box_pack_start(hbox, button, TRUE, TRUE, 0);
+  g_object_set(G_OBJECT(button), "tooltip-text",
+               _("add selected images to expanded group or create a new one"), (char *)NULL);
+  gtk_grid_attach(grid, button, 0, line, 2, 1);
   g_signal_connect(G_OBJECT(button), "clicked", G_CALLBACK(button_clicked), GINT_TO_POINTER(10));
 
   button = gtk_button_new_with_label(_("ungroup"));
   d->ungroup_button = button;
   g_object_set(G_OBJECT(button), "tooltip-text", _("remove selected images from the group"), (char *)NULL);
-  gtk_box_pack_start(hbox, button, TRUE, TRUE, 0);
+  gtk_grid_attach(grid, button, 2, line, 2, 1);
   g_signal_connect(G_OBJECT(button), "clicked", G_CALLBACK(button_clicked), GINT_TO_POINTER(11));
-
-  gtk_box_pack_start(GTK_BOX(self->widget), GTK_WIDGET(hbox), TRUE, TRUE, 0);
 }
 
-void
-gui_cleanup (dt_lib_module_t *self)
+void gui_cleanup(dt_lib_module_t *self)
 {
   // free(self->data);
   // self->data = NULL;
@@ -245,15 +242,10 @@ gui_cleanup (dt_lib_module_t *self)
 
 void init_key_accels(dt_lib_module_t *self)
 {
-  dt_accel_register_lib(self, NC_("accel", "remove from collection"),
-                        GDK_KEY_Delete, 0);
+  dt_accel_register_lib(self, NC_("accel", "remove from collection"), GDK_KEY_Delete, 0);
   dt_accel_register_lib(self, NC_("accel", "delete from disk"), 0, 0);
-  dt_accel_register_lib(self,
-                        NC_("accel", "rotate selected images 90 degrees CW"),
-                        0, 0);
-  dt_accel_register_lib(self,
-                        NC_("accel", "rotate selected images 90 degrees CCW"),
-                        0, 0);
+  dt_accel_register_lib(self, NC_("accel", "rotate selected images 90 degrees CW"), 0, 0);
+  dt_accel_register_lib(self, NC_("accel", "rotate selected images 90 degrees CCW"), 0, 0);
   dt_accel_register_lib(self, NC_("accel", "create HDR"), 0, 0);
   dt_accel_register_lib(self, NC_("accel", "duplicate"), GDK_KEY_d, GDK_CONTROL_MASK);
   dt_accel_register_lib(self, NC_("accel", "reset rotation"), 0, 0);
@@ -264,14 +256,12 @@ void init_key_accels(dt_lib_module_t *self)
 
 void connect_key_accels(dt_lib_module_t *self)
 {
-  dt_lib_image_t *d = (dt_lib_image_t*)self->data;
+  dt_lib_image_t *d = (dt_lib_image_t *)self->data;
 
   dt_accel_connect_button_lib(self, "remove from collection", d->remove_button);
   dt_accel_connect_button_lib(self, "delete from disk", d->delete_button);
-  dt_accel_connect_button_lib(self, "rotate selected images 90 degrees CW",
-                              d->rotate_cw_button);
-  dt_accel_connect_button_lib(self, "rotate selected images 90 degrees CCW",
-                              d->rotate_ccw_button);
+  dt_accel_connect_button_lib(self, "rotate selected images 90 degrees CW", d->rotate_cw_button);
+  dt_accel_connect_button_lib(self, "rotate selected images 90 degrees CCW", d->rotate_ccw_button);
   dt_accel_connect_button_lib(self, "create HDR", d->create_hdr_button);
   dt_accel_connect_button_lib(self, "duplicate", d->duplicate_button);
   dt_accel_connect_button_lib(self, "reset rotation", d->reset_button);

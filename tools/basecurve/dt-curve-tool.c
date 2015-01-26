@@ -319,11 +319,14 @@ enum module_type
 static void
 linearize_8bit(
   int width, int height,
-  uint8_t* s,
-  float* d)
+  uint8_t* _s,
+  float* _d)
 {
   // XXX support ICC profiles here ?
+#pragma omp parallel for
   for (int y=0; y<height; y++) {
+    float* d = _d + 3*width*y;
+    uint8_t* s = _s + 3*width*y;
     for (int x=0; x<width; x++) {
       d[0] = linearize_sRGB((float)s[0]/255.f);
       d[1] = linearize_sRGB((float)s[1]/255.f);
@@ -337,10 +340,13 @@ linearize_8bit(
 static void
 linearize_16bit(
   int width, int height,
-  uint16_t* s,
-  float* d)
+  uint16_t* _s,
+  float* _d)
 {
+#pragma omp parallel for
   for (int y=0; y<height; y++) {
+    float* d = _d + 3*width*y;
+    uint16_t* s = _s + 3*width*y;
     for (int x=0; x<width; x++) {
       d[0] = (float)s[0]/65535.f;
       d[1] = (float)s[1]/65535.f;
@@ -524,7 +530,11 @@ print_usage(
   const char* name)
 {
   fprintf(stderr,
-    "usage: %s [OPTIONS] <inputraw.ppm (16-bit)> <inputjpg.ppm (8-bit)>\n"
+    "first pass, accumulate statistics (can be repeated to cover all tonal range):\n"
+    "%s [OPTIONS] <inputraw.ppm (16-bit)> <inputjpg.ppm (8-bit)>\n"
+    "\n"
+    "second pass, compute the curves:\n"
+    " %s -z [OPTIONS]\n"
     "\n"
     "OPTIONS:\n"
     " -n <integer>    Number of nodes for the curve\n"
@@ -544,7 +554,7 @@ print_usage(
     "\n"
     "first do a pass over a few images to accumulate data in the save state file, and then\n"
     "compute the fit curve using option -z\n",
-    name);
+    name, name);
 }
 
 static void
@@ -792,7 +802,7 @@ main(int argc, char** argv)
   raw_buff = read_ppm16(opt.filename_raw, &raw_width, &raw_height);
   if(!raw_buff)
   {
-    fprintf(stderr, "error: failed reading the raw file data\n");
+    fprintf(stderr, "error: failed reading the raw file data `%s'\n", opt.filename_raw);
     goto exit;
   }
 
@@ -1133,9 +1143,11 @@ fit:;
             opt.filename_exif ? model : "new measured tonecurve",
             TONECURVE_PARAMS_VERSION, encoded);
     fprintf(stdout, "\n\n\n"
-                    "# if it pleases you, then in iop/tonecurve.c append the following line to the array presets_from_basecurve and modify its name\n"
-                    "# {\"%s\", {{",
-                    opt.filename_exif ? model : "new measured tonecurve");
+                    "# if it pleases you, then in iop/tonecurve.c append the following line to the array preset_camera_curves and modify its name\n"
+                    "# {\"%s\", \"%s\", \"%s\", 0, 51200, {{",
+                    opt.filename_exif ? model : "new measured tonecurve",
+                    opt.filename_exif ? maker : "<MAKER>",
+                    opt.filename_exif ? model : "<MODEL>");
     for (int i=0; i<3; i++)
     {
       fprintf(stdout, "{");
@@ -1145,9 +1157,10 @@ fit:;
       }
       fprintf(stdout, "},");
     }
-    fprintf(stdout, "}, {%d, %d, %d}, {%d, %d, %d}, 0, 0, 0}},\n",
+    fprintf(stdout, "}, {%d, %d, %d}, {%d, %d, %d}, %d, 0, %d}},\n",
       params.tonecurve_nodes[0], params.tonecurve_nodes[1], params.tonecurve_nodes[2],
-      params.tonecurve_type[0], params.tonecurve_type[1], params.tonecurve_type[2]);
+      params.tonecurve_type[0], params.tonecurve_type[1], params.tonecurve_type[2],
+      params.tonecurve_autoscale_ab, params.tonecurve_unbound_ab);
   }
 
 exit:

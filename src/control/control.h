@@ -26,7 +26,7 @@
 #include <inttypes.h>
 #include <gtk/gtk.h>
 #ifdef _OPENMP
-#  include <omp.h>
+#include <omp.h>
 #endif
 
 #include <gtk/gtk.h>
@@ -51,24 +51,23 @@ typedef enum dt_control_gui_mode_t
 #endif
   DT_SLIDESHOW,
   DT_MODE_NONE
-}
-dt_control_gui_mode_t;
+} dt_control_gui_mode_t;
 
 typedef GdkCursorType dt_cursor_t;
 
 // called from gui
 void *dt_control_expose(void *voidptr);
-gboolean dt_control_expose_endmarker(GtkWidget *widget, GdkEventExpose *event, gpointer user_data);
+gboolean dt_control_draw_endmarker(GtkWidget *widget, cairo_t *crf, gpointer user_data);
 void dt_control_button_pressed(double x, double y, double pressure, int which, int type, uint32_t state);
 void dt_control_button_released(double x, double y, int which, uint32_t state);
 void dt_control_mouse_moved(double x, double y, double pressure, int which);
 void dt_control_mouse_leave();
 void dt_control_mouse_enter();
-int  dt_control_key_pressed(guint key, guint state);
-int  dt_control_key_released(guint key, guint state);
-int  dt_control_key_pressed_override(guint key, guint state);
-gboolean dt_control_configure (GtkWidget *da, GdkEventConfigure *event, gpointer user_data);
-void dt_control_log(const char* msg, ...);
+int dt_control_key_pressed(guint key, guint state);
+int dt_control_key_released(guint key, guint state);
+int dt_control_key_pressed_override(guint key, guint state);
+gboolean dt_control_configure(GtkWidget *da, GdkEventConfigure *event, gpointer user_data);
+void dt_control_log(const char *msg, ...);
 void dt_control_log_busy_enter();
 void dt_control_log_busy_leave();
 void dt_control_change_cursor(dt_cursor_t cursor);
@@ -137,18 +136,16 @@ int dt_control_is_key_accelerators_on(struct dt_control_t *s);
 // All the accelerator keys for the key_pressed style shortcuts
 typedef struct dt_control_accels_t
 {
-  GtkAccelKey
-  filmstrip_forward, filmstrip_back,
-                     lighttable_up, lighttable_down, lighttable_right,
-                     lighttable_left, lighttable_center, lighttable_preview,
-                     lighttable_preview_display_focus, global_sideborders, global_header,
-                     slideshow_start;
+  GtkAccelKey filmstrip_forward, filmstrip_back, lighttable_up, lighttable_down, lighttable_right,
+      lighttable_left, lighttable_center, lighttable_preview, lighttable_preview_display_focus,
+      lighttable_preview_sticky, lighttable_preview_sticky_focus, lighttable_preview_sticky_exit,
+      global_sideborders, global_header, darkroom_preview, slideshow_start;
 
 } dt_control_accels_t;
 
 #define DT_CTL_LOG_SIZE 10
 #define DT_CTL_LOG_MSG_SIZE 200
-#define DT_CTL_LOG_TIMEOUT 20000
+#define DT_CTL_LOG_TIMEOUT 5000
 /**
  * this manages everything time-consuming.
  * distributes the jobs on all processors,
@@ -175,7 +172,6 @@ typedef struct dt_control_t
   // gui related stuff
   double tabborder;
   int32_t width, height;
-  float progress;
   pthread_t gui_thread;
   int button_down, button_down_which, button_type;
   double button_x, button_y;
@@ -189,10 +185,10 @@ typedef struct dt_control_t
   int dev_closeup;
 
   // message log
-  int  log_pos, log_ack;
+  int log_pos, log_ack;
   char log_message[DT_CTL_LOG_SIZE][DT_CTL_LOG_MSG_SIZE];
   guint log_message_timeout_id;
-  int  log_busy;
+  int log_busy;
   dt_pthread_mutex_t log_mutex;
 
   // gui settings
@@ -211,7 +207,7 @@ typedef struct dt_control_t
   dt_pthread_mutex_t queue_mutex, cond_mutex, run_mutex;
   pthread_cond_t cond;
   int32_t num_threads;
-  pthread_t *thread,kick_on_workers_thread;
+  pthread_t *thread, kick_on_workers_thread;
 
   GList *queues[DT_JOB_QUEUE_MAX];
   size_t queue_length[DT_JOB_QUEUE_MAX];
@@ -231,9 +227,10 @@ typedef struct dt_control_t
     {
       dt_lib_module_t *module;
       void *(*added)(dt_lib_module_t *self, gboolean has_progress_bar, const gchar *message);
-      void  (*destroyed)(dt_lib_module_t * self, struct dt_lib_backgroundjob_element_t * instance);
-      void  (*cancellable)(dt_lib_module_t * self, struct dt_lib_backgroundjob_element_t * instance, dt_progress_t * progress);
-      void  (*updated)(dt_lib_module_t * self, struct dt_lib_backgroundjob_element_t * instance, double value);
+      void (*destroyed)(dt_lib_module_t *self, struct dt_lib_backgroundjob_element_t *instance);
+      void (*cancellable)(dt_lib_module_t *self, struct dt_lib_backgroundjob_element_t *instance,
+                          dt_progress_t *progress);
+      void (*updated)(dt_lib_module_t *self, struct dt_lib_backgroundjob_element_t *instance, double value);
     } proxy;
 
   } progress_system;
@@ -250,8 +247,7 @@ typedef struct dt_control_t
 
   } proxy;
 
-}
-dt_control_t;
+} dt_control_t;
 
 void dt_control_init(dt_control_t *s);
 
@@ -294,7 +290,7 @@ static inline int32_t dt_ctl_get_num_procs()
   return omp_get_num_procs();
 #else
 #ifdef _SC_NPROCESSORS_ONLN
-  return sysconf (_SC_NPROCESSORS_ONLN);
+  return sysconf(_SC_NPROCESSORS_ONLN);
 #else
   return 1;
 #endif

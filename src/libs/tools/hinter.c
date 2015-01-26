@@ -31,13 +31,12 @@ DT_MODULE(1)
 typedef struct dt_lib_hinter_t
 {
   GtkWidget *label;
-}
-dt_lib_hinter_t;
+} dt_lib_hinter_t;
 
 
 static void _lib_hinter_set_message(dt_lib_module_t *self, const char *message);
 
-const char* name()
+const char *name()
 {
   return _("hinter");
 }
@@ -71,7 +70,6 @@ void gui_init(dt_lib_module_t *self)
 
   self->widget = gtk_event_box_new();
   d->label = gtk_label_new("");
-  gtk_misc_set_alignment(GTK_MISC(d->label), 0.5, 0.5);
   gtk_container_add(GTK_CONTAINER(self->widget), d->label);
 
   darktable.control->proxy.hinter.module = self;
